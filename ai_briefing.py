@@ -90,17 +90,22 @@ def fetch_hackernews(max_scan: int = 60) -> list[dict]:
 
 
 def fetch_github_trending() -> list[dict]:
-    """Fetch trending AI/ML repos via GitHub Search API. Focus on educational & practical tools."""
+    """
+    Fetch trending AI/ML repos via GitHub Search API. Searches ALL repos (no date filter),
+    deduplication cache prevents sending same repos within 7 days. This way users discover
+    important older repos they may have missed, not just brand-new ones.
+    """
     from urllib.parse import urlencode
-    yesterday = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
 
-    # Search for repos with educational/practical value, not just high stars
+    # Search for repos with educational/practical value across all time
     queries = [
-        f"topic:ai topic:tutorial created:>{yesterday}",
-        f"topic:machine-learning topic:education created:>{yesterday}",
-        f"prompt engineering created:>{yesterday}",
-        f"ai security created:>{yesterday}",
-        f"llm best-practices created:>{yesterday}",
+        "topic:artificial-intelligence topic:llm stars:>500",
+        "topic:gpt topic:chatgpt stars:>500",
+        "topic:ai-tools topic:productivity stars:>200",
+        "topic:machine-learning topic:education stars:>200",
+        "prompt engineering stars:>100",
+        "ai security stars:>100",
+        "llm best-practices stars:>100",
     ]
 
     all_repos = []
