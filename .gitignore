@@ -1,0 +1,31 @@
+# Cache and temporary files
+.seen_cache.json
+
+# Email credentials (if stored separately)
+config.py
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives (optional - uncomment if you don't want to track briefing history)
+# archives/
