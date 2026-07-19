@@ -128,8 +128,9 @@ Two HTML emails sent daily:
 
 ### Archives
 Markdown files saved to `archives/`:
-- `briefing_YYYY-MM-DD_HHMM_part1_news.md`
-- `briefing_YYYY-MM-DD_HHMM_part2_technical.md`
+- `briefing_YYYY-MM-DD_HHMM_part1_news.md` (when script succeeds)
+- `briefing_YYYY-MM-DD_HHMM_part2_technical.md` (when script succeeds)
+- `briefing_YYYY-MM-DD_HHMM_websearch.md` (fallback mode, single file)
 
 ### Cache
 `.seen_cache.json` - Tracks URLs from last 7 days to prevent duplicates
@@ -137,6 +138,9 @@ Markdown files saved to `archives/`:
 ## Troubleshooting
 
 ### 403 Forbidden Errors
+- **Network restrictions in Claude Code scheduled tasks**: The Python script may encounter 403 errors when fetching from external sources (HackerNews, RSS feeds, GitHub) due to sandbox network policies
+- **Fallback mode**: The scheduled task automatically switches to web search mode if the script fails, compiling the briefing from search results instead
+- **Manual workaround**: Run the script from your local terminal (not Claude Code sandbox) to bypass network restrictions
 - Check that RSS feeds haven't changed URLs
 - Verify Gemini API key is valid
 - Ensure network allows outbound HTTPS
@@ -150,6 +154,10 @@ Markdown files saved to `archives/`:
 - Enable 2FA on Gmail account
 - Generate App Password (not regular password)
 - Check SMTP isn't blocked by firewall
+
+### Syntax Errors in Python Script
+- **Fixed in commit 24c7305**: Removed duplicate section header that caused `SyntaxError: invalid character '⭐'`
+- If you encounter similar errors, check for duplicate triple-quoted strings in the `call_ai()` function
 
 ## Customization
 
@@ -180,3 +188,4 @@ Pull requests welcome! Please ensure:
 ## Author
 
 Created for AI awareness newsletter and daily briefing automation.
+# ai-briefing
