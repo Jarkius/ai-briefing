@@ -317,10 +317,20 @@ def call_ai(raw_data: str, date: str) -> str:
 Write these two sections in Markdown:
 
 ## 🔥 Top 3 Stories This Briefing
-Three most impactful items. For each: **Headline** · What happened (2-3 sentences) · Why it matters (1 sentence) · **📱 Social post** (≤280 chars) · Source link
+Three most impactful items. For each story:
+**Headline**
+What happened (2-3 sentences in plain language)
+**Why it matters:** (1 clear sentence)
+📱 Social post: (≤280 chars, include 2-3 hashtags)
+[Source](url)
 
 ## 📰 AI News & Headlines
-For each news item from the data: **Bold headline** · paragraph (3-4 sentences for a non-expert) · **Key takeaway** (1 sentence) · **📱 Social post** (≤280 chars) · [Source](url)
+For each news item:
+**Bold headline**
+Paragraph explaining what happened (3-4 sentences for non-experts)
+**Key takeaway:** (actionable insight, 1 sentence)
+📱 Social post: (≤280 chars with hashtags)
+[Source](url)
 
 {base_rules}""")
 
@@ -331,12 +341,22 @@ For each news item from the data: **Bold headline** · paragraph (3-4 sentences 
 Write these two sections in Markdown:
 
 ## 🏛️ AI Governance & Policy
-Regulation, ethics, safety, company policies, government moves. Use the data or your knowledge.
-For each: **Bold topic** · paragraph (3-4 sentences) · **Key takeaway** · **📱 Social post** (≤280 chars) · Source
+Regulation, ethics, safety, company policies, government moves.
+For each:
+**Bold topic**
+Paragraph explaining the policy/regulation (3-4 sentences)
+**Key takeaway:** (what it means for practitioners)
+📱 Social post: (≤280 chars with hashtags)
+[Source](url)
 
 ## 🧠 AI Mindset & Culture
-How AI is changing how people think, work, and collaborate. Human-interest angles, adoption stories.
-Same format: paragraph + key takeaway + social post + source.
+How AI is changing work, thinking, and collaboration. Human-interest angles.
+For each:
+**Bold headline**
+What's happening (3-4 sentences)
+**Key takeaway:** (actionable insight)
+📱 Social post: (≤280 chars with hashtags)
+[Source](url)
 
 {base_rules}""")
 
@@ -347,12 +367,22 @@ Same format: paragraph + key takeaway + social post + source.
 Write these two sections in Markdown:
 
 ## 📚 AI Learning & Best Practices
-Prompting techniques, workflow tips, productivity hacks, security best practices, ethical AI use.
-For each: **Topic** · What it is and why it matters (3 sentences) · **How to apply it** (1-2 concrete actions) · **📱 Social post** (≤280 chars) · Source if available
+Tutorials, workflows, case studies, how-tos from the data.
+For each:
+**Bold title**
+What you'll learn (3-4 sentences, beginner-friendly)
+**Key takeaway:** (why this matters)
+📱 Social post: (≤280 chars with hashtags like #AILearning #Tutorial)
+[Source](url)
 
 ## 🎯 Prompt Engineering Tips
-Practical prompt patterns, techniques, and examples that improve AI outputs.
-For each: **Technique** · What it is and when to use it (2-3 sentences) · **Example prompt** · **📱 Social post** (≤280 chars)
+Effective prompting techniques, examples, patterns from the data.
+For each tip:
+**Bold technique name**
+How it works (2-3 sentences with example)
+**Key takeaway:** (when to use this)
+📱 Social post: (≤280 chars with hashtags like #PromptEngineering #AITips)
+[Source](url)
 
 {base_rules}""")
 
@@ -363,12 +393,22 @@ For each: **Technique** · What it is and when to use it (2-3 sentences) · **Ex
 Write these two sections in Markdown:
 
 ## 🔒 AI Security & Privacy
-Security risks, privacy concerns, data protection, safe AI practices.
-For each: **Topic** · What the risk/practice is (3 sentences) · **Action to take** (1-2 steps) · **📱 Social post** (≤280 chars) · Source
+Security risks, vulnerabilities, data protection, safe AI practices from the data.
+For each:
+**Bold topic**
+The security issue explained (3 sentences)
+**Action to take:** (1-2 concrete steps)
+📱 Social post: (≤280 chars with hashtags like #AISecurity #Privacy)
+[Source](url)
 
 ## ⚖️ AI Ethics & Responsible Use
-Bias, fairness, transparency, accountability, human oversight.
-For each: **Topic** · The ethical issue explained (3 sentences) · **What practitioners should consider** · **📱 Social post** · Source
+Bias, fairness, transparency, accountability issues from the data.
+For each:
+**Bold topic**
+The ethical issue (3 sentences)
+**What to consider:** (guidance for practitioners)
+📱 Social post: (≤280 chars with hashtags like #AIEthics #ResponsibleAI)
+[Source](url)
 
 {base_rules}""")
 
@@ -379,12 +419,22 @@ For each: **Topic** · The ethical issue explained (3 sentences) · **What pract
 Write these two sections in Markdown:
 
 ## 🔬 AI Research & Emerging Capabilities
-New research, papers, experimental tools, emerging AI capabilities — explained accessibly.
-For each: **Topic** · What was discovered/built (3 sentences) · **Why it matters for practitioners** · **📱 Social post** · Source
+New research, papers, experimental capabilities from the data.
+For each:
+**Bold headline**
+What was discovered/built (3-4 sentences, accessible language)
+**Why it matters:** (implications for practitioners)
+📱 Social post: (≤280 chars with hashtags like #AIResearch #MachineLearning)
+[Source](url)
 
 ## 💻 Useful AI Tools & Resources
-Use the GitHub data. Focus on educational repos, tutorials, security tools, prompt libraries, and practical utilities.
-For each: **[Repo/Tool name](url)** · What it does and who it's for (2-3 sentences) · **Why try it** (practical benefit) · ⭐stars · language
+GitHub repos, frameworks, libraries, datasets from the data.
+For each tool:
+**Bold tool name** (⭐ star count if GitHub)
+What it does (2-3 sentences)
+**Key feature:** (standout capability)
+📱 Social post: (≤280 chars with hashtags like #AITools #OpenSource)
+[Source](url)
 
 {base_rules}""")
 
@@ -395,8 +445,13 @@ For each: **[Repo/Tool name](url)** · What it does and who it's for (2-3 senten
 Write this section in Markdown:
 
 ## 💬 Community Conversations
-Hot topics, debates, and discussions from HackerNews and Reddit in the data.
-For each: **Topic** · What the community is discussing (3 sentences) · **Key insight** · **📱 Social post** (≤280 chars)
+Hot topics, debates, discussions from HackerNews and Reddit in the data.
+For each:
+**Bold topic**
+What the community is discussing (3-4 sentences)
+**Key insight:** (takeaway from the discussion)
+📱 Social post: (≤280 chars with hashtags like #AI #TechTwitter #HackerNews)
+[Source](url)
 
 {base_rules}""")
 
@@ -414,45 +469,101 @@ def _inline(text: str) -> str:
 
 
 def markdown_to_html(text: str, date_str: str) -> str:
-    lines, parts, in_list = text.split("\n"), [], False
-    for line in lines:
-        s = line.strip()
+    """Convert markdown to newsletter-ready HTML with icons, hashtags, and social-ready formatting."""
+    lines, parts = text.split("\n"), []
+    i = 0
+
+    while i < len(lines):
+        s = lines[i].strip()
+
+        # Section headers with emoji icons
         if s.startswith("## "):
-            if in_list: parts.append("</ul>"); in_list = False
             parts.append(
-                f'<h2 style="color:#1a1a2e;border-bottom:2px solid #e5e7eb;'
-                f'padding-bottom:6px;margin-top:30px">{_inline(s[3:])}</h2>'
+                f'<div style="margin:32px 0 20px;padding:16px;background:#f8fafc;border-left:4px solid #3b82f6;border-radius:8px">'
+                f'<h2 style="color:#1e293b;margin:0;font-size:20px;font-weight:600">{_inline(s[3:])}</h2>'
+                f'</div>'
             )
-        elif s.startswith("# "):
-            parts.append(f'<h1 style="color:#1a1a2e">{_inline(s[2:])}</h1>')
-        elif s.startswith(("- ", "* ")):
-            if not in_list: parts.append("<ul>"); in_list = True
-            parts.append(f"<li>{_inline(s[2:])}</li>")
+
+        # Story/item blocks with visual structure
+        elif s.startswith("**") and "**" in s[2:]:
+            # Extract headline
+            end_idx = s.index("**", 2)
+            headline = s[2:end_idx]
+            rest = s[end_idx+2:].strip()
+
+            # Build story card
+            card = f'<div style="margin:24px 0;padding:20px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">'
+            card += f'<h3 style="margin:0 0 12px;color:#0f172a;font-size:18px;font-weight:600;line-height:1.4">{_inline(headline)}</h3>'
+
+            # Body paragraphs
+            body_lines = [rest] if rest else []
+            i += 1
+            while i < len(lines):
+                next_line = lines[i].strip()
+                if next_line.startswith(("**", "## ", "📱", "---", "")) or next_line.startswith("#"):
+                    break
+                body_lines.append(next_line)
+                i += 1
+            i -= 1
+
+            # Format body with spacing
+            for body_line in body_lines:
+                if body_line.startswith("**Key"):
+                    card += f'<div style="margin:12px 0 8px;padding:10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px"><strong style="color:#92400e">💡 {_inline(body_line[2:])}</strong></div>'
+                elif body_line.startswith("**Why"):
+                    card += f'<div style="margin:12px 0 8px;padding:10px;background:#dbeafe;border-left:3px solid #3b82f6;border-radius:4px"><strong style="color:#1e40af">🎯 {_inline(body_line[2:])}</strong></div>'
+                elif body_line.startswith("📱"):
+                    # Social post callout
+                    social = body_line.replace("📱 Social post:", "").replace("📱", "").strip()
+                    card += f'<div style="margin:16px 0 8px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px">'
+                    card += f'<div style="color:#15803d;font-size:13px;font-weight:600;margin-bottom:6px">📱 READY TO SHARE</div>'
+                    card += f'<div style="color:#166534;font-size:14px;line-height:1.5">{_inline(social)}</div>'
+                    card += '</div>'
+                elif body_line.startswith("[Source]") or body_line.startswith("Source:"):
+                    # Source link
+                    card += f'<div style="margin:12px 0 0;padding-top:12px;border-top:1px solid #e2e8f0"><span style="font-size:12px;color:#64748b">🔗 {_inline(body_line)}</span></div>'
+                elif "#" in body_line and body_line.startswith("#"):
+                    # Hashtags
+                    card += f'<div style="margin:8px 0 0"><span style="font-size:13px;color:#3b82f6">{_inline(body_line)}</span></div>'
+                else:
+                    card += f'<p style="margin:8px 0;color:#334155;line-height:1.7">{_inline(body_line)}</p>'
+
+            card += '</div>'
+            parts.append(card)
+
+        # Section dividers
         elif s == "---":
-            if in_list: parts.append("</ul>"); in_list = False
-            parts.append('<hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">')
-        elif s == "":
-            if in_list: parts.append("</ul>"); in_list = False
-        else:
-            if in_list: parts.append("</ul>"); in_list = False
-            parts.append(f"<p>{_inline(s)}</p>")
-    if in_list:
-        parts.append("</ul>")
+            parts.append('<hr style="border:none;border-top:2px solid #e2e8f0;margin:32px 0">')
+
+        # Regular paragraphs
+        elif s and not s.startswith(("##", "**", "📱", "#")):
+            parts.append(f'<p style="margin:12px 0;color:#475569;line-height:1.7">{_inline(s)}</p>')
+
+        i += 1
+
     body = "\n".join(parts)
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"></head>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-             max-width:680px;margin:0 auto;padding:24px;color:#333;line-height:1.65">
-  <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);padding:24px 28px;
-              border-radius:12px;margin-bottom:28px">
-    <h1 style="color:#fff;margin:0;font-size:22px">🤖 Daily AI Briefing</h1>
-    <p style="color:#94a3b8;margin:6px 0 0">{date_str}</p>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+             max-width:680px;margin:0 auto;padding:20px;background:#f8fafc">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:28px 32px;border-radius:16px;margin-bottom:32px;box-shadow:0 4px 6px rgba(0,0,0,0.1)">
+    <h1 style="color:#fff;margin:0;font-size:26px;font-weight:700;letter-spacing:-0.5px">🤖 Daily AI Briefing</h1>
+    <p style="color:#cbd5e1;margin:8px 0 0;font-size:14px">{date_str}</p>
   </div>
-  {body}
-  <div style="margin-top:36px;padding-top:16px;border-top:1px solid #e5e7eb;
-              color:#9ca3af;font-size:12px">
-    Sources: HackerNews · Tech RSS · Grok-3 (maxplus-ai.cc)
+
+  <!-- Content -->
+  <div style="background:#ffffff;padding:32px;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+    {body}
   </div>
+
+  <!-- Footer -->
+  <div style="margin-top:32px;padding:20px;text-align:center;color:#94a3af;font-size:13px;background:#ffffff;border-radius:12px">
+    <p style="margin:0 0 8px"><strong>Sources:</strong> HackerNews · RSS Feeds · GitHub · Gemini AI</p>
+    <p style="margin:0">Curated by AI · Delivered with ❤️</p>
+  </div>
+
 </body></html>"""
 
 
