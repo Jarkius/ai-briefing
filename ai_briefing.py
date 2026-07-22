@@ -3,7 +3,7 @@
 Daily AI Briefing
 1. Fetches live AI news from HackerNews API + RSS feeds
 2. Summarizes with Claude (claude-sonnet-5) via maxplus API
-3. Emails result via Gmail SMTP to juckrit@gmail.com
+3. Emails result via Gmail SMTP (recipient configured in .env)
 Run:       python3 ai_briefing.py
 Scheduled: launchd via com.user.ai-briefing.plist
 """
@@ -16,11 +16,34 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 # ── CONFIGURATION ──────────────────────────────────────────────────────────────
-MAXPLUS_API_KEY    = "ccsk-REDACTED"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _load_env():
+    """Load key=value pairs from .env next to this script (no external deps)."""
+    env_path = os.path.join(SCRIPT_DIR, ".env")
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    os.environ.setdefault(key.strip(), value.strip())
+
+_load_env()
+
+MAXPLUS_API_KEY    = os.environ.get("MAXPLUS_API_KEY", "")
 MAXPLUS_MODEL      = "gemini-3.5-flash"           # Gemini 3.5 Flash — latest
-GMAIL_ADDRESS      = "juckrit@gmail.com"
-GMAIL_APP_PASSWORD = "REDACTED-APP-PASSWORD"
-RECIPIENT_EMAIL    = "juckrit@gmail.com"
+GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+RECIPIENT_EMAIL    = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
+
+_missing = [name for name, val in [
+    ("MAXPLUS_API_KEY", MAXPLUS_API_KEY),
+    ("GMAIL_ADDRESS", GMAIL_ADDRESS),
+    ("GMAIL_APP_PASSWORD", GMAIL_APP_PASSWORD),
+] if not val]
+if _missing:
+    sys.exit(f"ERROR — missing config: {', '.join(_missing)}. Copy .env.example to .env and fill it in.")
 
 # Deduplication cache (stores URLs seen in last 7 days)
 CACHE_FILE = os.path.expanduser("~/workspace/dev/ai-briefing/.seen_cache.json")

@@ -31,17 +31,20 @@ arXiv
 
 ### Configuration
 
-Edit these constants in `ai_briefing.py`:
+Copy `.env.example` to `.env` next to the script and fill in your values:
 
-```python
-GEMINI_API_KEY = "your-api-key"
-GEMINI_BASE_URL = "https://maxplus-ai.cc/v1"
-GEMINI_MODEL = "gemini-3.5-flash"
-
-GMAIL_ADDRESS = "your-email@gmail.com"
-GMAIL_APP_PASSWORD = "your-app-password"
-RECIPIENT_EMAIL = "recipient@gmail.com"
+```bash
+cp .env.example .env
 ```
+
+```dotenv
+MAXPLUS_API_KEY=ccsk-your-api-key-here
+GMAIL_ADDRESS=your-email@gmail.com
+GMAIL_APP_PASSWORD=your-app-password
+RECIPIENT_EMAIL=recipient@gmail.com   # optional, defaults to GMAIL_ADDRESS
+```
+
+The `.env` file is gitignored — never commit real credentials.
 
 ### Installation
 

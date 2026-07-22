@@ -1,9 +1,17 @@
 # Cache and temporary files
 .seen_cache.json
 
+# Secrets — never commit
+.env
+
 # Email credentials (if stored separately)
 config.py
 credentials.json
+
+# Runtime logs and debug output
+briefing.log
+briefing_error.log
+debug_*.txt
 
 # Python
 __pycache__/
