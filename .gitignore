@@ -24,6 +24,11 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
+
+# Local database + runtime state (per-machine, not synced)
+data/
+archive/test-runs/
 
 # IDE
 .vscode/

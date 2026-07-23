@@ -6,8 +6,8 @@
     <string>com.user.ai-briefing</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/jarkius/workspace/dev/ai-briefing/ai_briefing.py</string>
+        <string>/Users/jarkius/workspace/dev/ai-briefing/.venv/bin/python</string>
+        <string>/Users/jarkius/workspace/dev/ai-briefing/run.py</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
@@ -27,6 +27,8 @@
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/jarkius</string>
         <key>http_proxy</key>
         <string></string>
         <key>https_proxy</key>

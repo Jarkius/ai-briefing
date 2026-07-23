@@ -1,0 +1,16 @@
+[
+  { "source_type": "hackernews", "identifier": "top", "name": "Hacker News (top)" },
+  { "source_type": "news", "identifier": "techcrunch", "name": "TechCrunch" },
+  { "source_type": "news", "identifier": "ars", "name": "Ars Technica" },
+  { "source_type": "news", "identifier": "https://www.artificialintelligence-news.com/feed/", "name": "AI News" },
+  { "source_type": "news", "identifier": "https://www.marktechpost.com/feed/", "name": "MarkTechPost" },
+  { "source_type": "news", "identifier": "https://blog.google/technology/ai/rss/", "name": "Google AI Blog" },
+  { "source_type": "news", "identifier": "https://huggingface.co/blog/feed.xml", "name": "Hugging Face Blog" },
+  { "source_type": "news", "identifier": "https://pytorch.org/feed.xml", "name": "PyTorch Blog" },
+  { "source_type": "news", "identifier": "https://www.deeplearning.ai/the-batch/rss/", "name": "DeepLearning.AI — The Batch" },
+  { "source_type": "arxiv", "identifier": "ai", "name": "arXiv cs.AI" },
+  { "source_type": "arxiv", "identifier": "ml", "name": "arXiv cs.LG" },
+  { "source_type": "youtube", "identifier": "@AndrejKarpathy", "name": "Andrej Karpathy" },
+  { "source_type": "youtube", "identifier": "@YannicKilcher", "name": "Yannic Kilcher" },
+  { "source_type": "youtube", "identifier": "@aiexplained-official", "name": "AI Explained" }
+]
