@@ -46,3 +46,4 @@ Thumbs.db
 
 # Archives (optional - uncomment if you don't want to track briefing history)
 # archives/
+.team/

@@ -121,21 +121,28 @@ Runs daily at 06:00. Logs to `briefing.log` / `briefing_error.log`.
 Use Windows Task Scheduler with the included wrapper scripts:
 
 1. Copy `.env.example` to `.env` and fill in your credentials (see Configuration above).
-2. Right-click `setup_task.bat` → **Run as administrator**. This registers a daily task
+2. Create the venv and install the project (there's no Windows equivalent of `setup.sh`
+   yet — run these manually from a `cmd`/PowerShell prompt in the repo root):
+   ```bat
+   py -3.11 -m venv .venv
+   .venv\Scripts\pip install -e .
+   ```
+   (The vendored `noapi-google-search-mcp` fork and Playwright's Chromium — see
+   `setup.sh` — are only required for the collector/researcher phases; install them
+   the same way if you run those on Windows too.)
+3. Right-click `setup_task.bat` → **Run as administrator**. This registers a daily task
    (`\ai\AI Briefing Daily`) that runs `run_briefing.bat`, which in turn calls
-   `ai_briefing.py` and logs output to `logs\briefing_YYYY-MM-DD.log`.
-3. If the task needs to survive screen lock/logoff, or run on battery, use
+   `.venv\Scripts\python.exe run.py` and logs output to `logs\briefing_YYYY-MM-DD.log`.
+4. If the task needs to survive screen lock/logoff, or run on battery, use
    `fix_task_settings.ps1` (run from an elevated PowerShell prompt) to switch the task's
    power/logon settings.
 
-**Email delivery on corporate networks:** if a proxy/DLP agent (e.g. Netskope) blocks
-outbound Gmail SMTP, `ai_briefing.py` automatically falls back to sending via a local
-Outlook client through PowerShell COM automation. This fallback requires Outlook to be
-installed and an interactive desktop session — it will not work if the scheduled task
-is set to "Run whether user is logged on or not."
-
-**Note:** the Windows wrapper scripts currently invoke the legacy `ai_briefing.py`
-pipeline — they have not yet been updated to the new `run.py` orchestrator.
+**Email delivery on corporate networks:** the current pipeline (`src/briefing/sender.py`)
+only sends via Gmail SMTP (trying port 465, then falling back to 587 — see
+"Gmail SMTP errors" below). The legacy `ai_briefing.py` had an Outlook COM automation
+fallback for networks where a proxy/DLP agent (e.g. Netskope) blocks outbound SMTP; that
+fallback has not been ported to the new pipeline. If you're on such a network, outbound
+Gmail SMTP must be reachable for scheduled sends to succeed.
 
 ## Two-computer workflow
 
