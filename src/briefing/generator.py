@@ -165,19 +165,49 @@ def log(msg: str):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 
-def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
-    """Single Gemini call via maxplus, max 4000 output tokens.
-
-    Retries with exponential backoff — the maxplus pool has been observed
-    to return intermittent HTTP 503 "Service Unavailable" independent of
-    payload size (a 30k-char prompt failed twice in a row, then a 50k-char
-    prompt with the same structure succeeded immediately after), so this is
-    provider-side flakiness, not a deterministic size limit. Two immediate
-    attempts with no delay (the original behavior) wasn't enough to ride
-    out a transient backend blip."""
+def _call_with_retry(request_factory, extract, provider_name: str, max_attempts: int) -> str:
+    """Shared retry loop for a single provider. Retries with exponential
+    backoff on 5xx, 429, URLError (network), and TimeoutError — the maxplus
+    pool has been observed to return intermittent HTTP 503 "Service
+    Unavailable" independent of payload size, so this is provider-side
+    flakiness, not a deterministic size limit. Fails FAST (no retry) on any
+    other 4xx (e.g. 402 insufficient_credit, 401, 403, 404) since those are
+    deterministic — retrying just burns the backoff budget before the
+    caller can move to the next provider. Logs the response body's first
+    200 chars on any HTTP error for diagnosis."""
+    import time
     import urllib.error
     import urllib.request
 
+    last_error = None
+    for attempt in range(max_attempts):
+        req = request_factory()
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read())
+            return extract(data)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")[:200]
+            if e.code != 429 and e.code < 500:
+                log(f"  {provider_name} call failed fast: HTTP {e.code} {body}")
+                raise
+            last_error = e
+            log(f"  {provider_name} call failed (attempt {attempt + 1}/{max_attempts}): HTTP {e.code} {body}")
+            if attempt < max_attempts - 1:
+                backoff = 10 * (2 ** attempt)
+                log(f"  retrying in {backoff}s…")
+                time.sleep(backoff)
+        except (urllib.error.URLError, TimeoutError) as e:
+            last_error = e
+            log(f"  {provider_name} call failed (attempt {attempt + 1}/{max_attempts}): {e}")
+            if attempt < max_attempts - 1:
+                backoff = 10 * (2 ** attempt)
+                log(f"  retrying in {backoff}s…")
+                time.sleep(backoff)
+    raise last_error
+
+
+def _maxplus_call(system: str, user: str, max_attempts: int) -> str:
     payload = {
         "model": config.MAXPLUS_MODEL,
         "messages": [
@@ -186,29 +216,78 @@ def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
         ],
         "max_tokens": 4000,
     }
-    req = urllib.request.Request(
-        "https://api.maxplus-ai.cc/v1/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {config.MAXPLUS_API_KEY}",
-        },
-        method="POST",
+    body = json.dumps(payload).encode()
+
+    def request_factory():
+        import urllib.request
+        return urllib.request.Request(
+            "https://api.maxplus-ai.cc/v1/chat/completions",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {config.MAXPLUS_API_KEY}",
+            },
+            method="POST",
+        )
+
+    def extract(data):
+        return data["choices"][0]["message"]["content"]
+
+    return _call_with_retry(request_factory, extract, "maxplus", max_attempts)
+
+
+def _gemini_call(system: str, user: str, max_attempts: int) -> str:
+    """Direct Google Gemini API call (fallback when maxplus is unconfigured
+    or fails) — same request shape as legacy/ai_briefing.py:_gemini_direct_call."""
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "systemInstruction": {"parts": [{"text": system}]},
+        "generationConfig": {"maxOutputTokens": 4000},
+    }
+    body = json.dumps(payload).encode()
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}"
     )
+
+    def request_factory():
+        import urllib.request
+        return urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+    def extract(data):
+        # Thinking models include parts without "text" (e.g. thoughtSignature) — skip them
+        parts = data["candidates"][0]["content"]["parts"]
+        return next(p["text"] for p in parts if "text" in p)
+
+    return _call_with_retry(request_factory, extract, "Gemini direct", max_attempts)
+
+
+def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
+    """Provider chain: maxplus first (if MAXPLUS_API_KEY is set), falling
+    back to the direct Gemini API (if GEMINI_API_KEY is set) once maxplus
+    exhausts its retries or fails fast on a deterministic 4xx (e.g. the
+    maxplus pool's HTTP 402 insufficient_credit on large calls). Raises the
+    last provider's error if every configured provider fails."""
     last_error = None
-    for attempt in range(max_attempts):
+    if config.MAXPLUS_API_KEY:
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read())
-            return data["choices"][0]["message"]["content"]
-        except (urllib.error.URLError, TimeoutError) as e:
+            return _maxplus_call(system, user, max_attempts)
+        except Exception as e:
             last_error = e
-            log(f"  Gemini call failed (attempt {attempt + 1}/{max_attempts}): {e}")
-            if attempt < max_attempts - 1:
-                import time
-                backoff = 10 * (2 ** attempt)
-                log(f"  retrying in {backoff}s…")
-                time.sleep(backoff)
+            log(f"  maxplus unavailable ({e}) — falling back to Gemini direct…")
+    if config.GEMINI_API_KEY:
+        try:
+            return _gemini_call(system, user, max_attempts)
+        except Exception as e:
+            last_error = e
+            log(f"  Gemini direct failed: {e}")
+    if last_error is None:
+        raise RuntimeError("No AI provider configured: set MAXPLUS_API_KEY or GEMINI_API_KEY")
     raise last_error
 
 

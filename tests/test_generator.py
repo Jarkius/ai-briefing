@@ -1,13 +1,18 @@
-"""Tests for generator.py: prompt/context assembly and the char budget.
-
-No network — these exercise pure functions only (budget_items, build_context,
-_sanitize, _cap_transcript), never call_gemini/_grok_call.
+"""Tests for generator.py: prompt/context assembly, the char budget, and the
+maxplus -> Gemini-direct provider chain (with mocked urllib, no network).
 """
 
+import io
+import json
+import urllib.error
+from unittest.mock import MagicMock, patch
+
+from briefing import config
 from briefing.generator import (
     TOTAL_CHAR_BUDGET,
     TRANSCRIPT_CHAR_CAP,
     _cap_transcript,
+    _grok_call,
     _rendered_size,
     _sanitize,
     budget_items,
@@ -171,3 +176,75 @@ def test_sanitize_bare_url_and_link_together():
     sanitized = _sanitize(text)
     assert "[Source](https://good.example.com/a)" in sanitized
     assert "https://bare.example.com/b" not in sanitized
+
+
+# ---- _grok_call: maxplus -> Gemini-direct provider chain -------------------
+
+
+def _http_error(code, body=b'{"error": "boom"}'):
+    return urllib.error.HTTPError("http://x", code, "err", {}, io.BytesIO(body))
+
+
+def _ok_response(payload):
+    resp = MagicMock()
+    resp.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+    resp.__exit__.return_value = False
+    return resp
+
+
+MAXPLUS_OK = {"choices": [{"message": {"content": "maxplus reply"}}]}
+GEMINI_OK = {"candidates": [{"content": {"parts": [{"text": "gemini reply"}]}}]}
+
+
+def test_402_no_retry_immediate_fallback_to_gemini():
+    with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
+         patch.object(config, "GEMINI_API_KEY", "g-key"), \
+         patch("urllib.request.urlopen") as urlopen, \
+         patch("time.sleep") as sleep:
+        urlopen.side_effect = [_http_error(402, b'{"error": "insufficient_credit"}'), _ok_response(GEMINI_OK)]
+        result = _grok_call("sys", "user", max_attempts=4)
+
+    assert result == "gemini reply"
+    assert urlopen.call_count == 2  # one fail-fast maxplus attempt, one gemini attempt
+    sleep.assert_not_called()
+
+
+def test_503_retries_before_succeeding():
+    with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
+         patch.object(config, "GEMINI_API_KEY", ""), \
+         patch("urllib.request.urlopen") as urlopen, \
+         patch("time.sleep") as sleep:
+        urlopen.side_effect = [_http_error(503), _http_error(503), _ok_response(MAXPLUS_OK)]
+        result = _grok_call("sys", "user", max_attempts=4)
+
+    assert result == "maxplus reply"
+    assert urlopen.call_count == 3
+    assert sleep.call_count == 2
+
+
+def test_both_providers_fail_raises():
+    with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
+         patch.object(config, "GEMINI_API_KEY", "g-key"), \
+         patch("urllib.request.urlopen") as urlopen, \
+         patch("time.sleep"):
+        urlopen.side_effect = [_http_error(503), _http_error(503), _http_error(500), _http_error(500)]
+        try:
+            _grok_call("sys", "user", max_attempts=2)
+            assert False, "expected an exception"
+        except urllib.error.HTTPError as e:
+            assert e.code == 500  # last provider's (Gemini's) error
+
+
+def test_no_gemini_api_key_raises_maxplus_error():
+    with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
+         patch.object(config, "GEMINI_API_KEY", ""), \
+         patch("urllib.request.urlopen") as urlopen, \
+         patch("time.sleep"):
+        urlopen.side_effect = [_http_error(402, b'{"error": "insufficient_credit"}')]
+        try:
+            _grok_call("sys", "user", max_attempts=4)
+            assert False, "expected an exception"
+        except urllib.error.HTTPError as e:
+            assert e.code == 402
+
+    assert urlopen.call_count == 1  # no Gemini fallback attempted
