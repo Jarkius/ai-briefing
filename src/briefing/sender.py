@@ -10,11 +10,29 @@ output to what actually gets emailed — no second render path.
 import imaplib
 import re
 import smtplib
+import time
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from . import config
+
+
+def _with_retry(fn, max_attempts: int = 3, label: str = "operation"):
+    """Retry a zero-arg callable with backoff. Gmail's TLS handshake on
+    this network has been observed to reset intermittently (confirmed via
+    raw-socket tests independent of any library) — a single failure should
+    not fail the whole send/check, since the very next attempt often
+    succeeds."""
+    last_error = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last_error = e
+            if attempt < max_attempts - 1:
+                time.sleep(5 * (attempt + 1))
+    raise last_error
 
 
 def _inline(text: str) -> str:
@@ -121,17 +139,39 @@ def split_two_parts(markdown_text: str) -> tuple[str, str]:
 
 def send_email(subject: str, html: str) -> None:
     """Send one HTML email via Gmail SMTP. Raises on failure — callers decide
-    whether that's fatal (CLI) or a banner (dashboard)."""
+    whether that's fatal (CLI) or a banner (dashboard).
+
+    Tries SMTP_SSL:465 first, falls back to STARTTLS:587. Observed on this
+    network: TLS handshakes to smtp.gmail.com are intermittently reset —
+    465 succeeded when 587 failed in back-to-back tests, and this pattern
+    reproduced with raw sockets (no smtplib involved), so it's network-level
+    flakiness, not an smtplib/library bug. Trying both gives each send the
+    best chance of getting through a transient block on one path."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"AI Briefing <{config.GMAIL_ADDRESS}>"
     msg["To"] = config.RECIPIENT_EMAIL
     msg.attach(MIMEText(html, "html"))
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
-        server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+
+    def _via_465():
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
+            server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
+            server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+
+    def _via_587():
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
+            server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+
+    try:
+        _with_retry(_via_465, max_attempts=2, label="SMTP:465")
+        return
+    except Exception:
+        pass
+
+    _with_retry(_via_587, max_attempts=2, label="SMTP:587")
 
 
 def already_sent_today(subject_contains: str) -> bool:
@@ -140,12 +180,16 @@ def already_sent_today(subject_contains: str) -> bool:
     truth (SMTP itself has no idempotency) — see mcp-integration plan
     architecture decision 4."""
     today_imap = datetime.now().strftime("%d-%b-%Y")
-    with imaplib.IMAP4_SSL("imap.gmail.com") as imap:
-        imap.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
-        imap.select("INBOX", readonly=True)
-        typ, data = imap.search(None, f'(SINCE "{today_imap}" SUBJECT "{subject_contains}")')
-        ids = data[0].split() if data and data[0] else []
-        return len(ids) > 0
+
+    def _check():
+        with imaplib.IMAP4_SSL("imap.gmail.com", timeout=30) as imap:
+            imap.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
+            imap.select("INBOX", readonly=True)
+            typ, data = imap.search(None, f'(SINCE "{today_imap}" SUBJECT "{subject_contains}")')
+            ids = data[0].split() if data and data[0] else []
+            return len(ids) > 0
+
+    return _with_retry(_check, max_attempts=3, label="IMAP check")
 
 
 def send_two_part_briefing(part1_html: str, part2_html: str, date_str: str) -> dict:

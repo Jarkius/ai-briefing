@@ -275,7 +275,15 @@ def build_context(items: list[dict]) -> str:
     for source_type, group in by_type.items():
         lines.append(f"=== {source_type.upper()} ===")
         for item in group:
-            lines.append(f"- {item.get('title', '')} — {item.get('url', '')}")
+            title = item.get("title", "")
+            url = item.get("url", "")
+            # markdown-link format, not a bare trailing URL: _sanitize()'s
+            # URL-stripping regex only spares URLs already inside
+            # [text](url) — a bare "- title — url" line loses its link
+            # entirely, which is what silently dropped every source link
+            # before this fix (Gemini's output resorted to "URL not
+            # provided in raw data" for every item).
+            lines.append(f"- [{title}]({url})" if url else f"- {title}")
             if item.get("content"):
                 lines.append(f"  {item['content'][:2000]}")
         lines.append("")

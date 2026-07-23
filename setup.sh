@@ -19,8 +19,8 @@ fi
 echo "==> Creating Python 3.11 venv at .venv"
 uv venv --python 3.11 .venv
 
-echo "==> Installing project + vendored MCP server (pinned @ ${MCP_FORK_SHA:0:12})"
-uv pip install --python .venv/bin/python -e .
+echo "==> Installing project (+ dashboard extras) + vendored MCP server (pinned @ ${MCP_FORK_SHA:0:12})"
+uv pip install --python .venv/bin/python -e ".[panel]"
 uv pip install --python .venv/bin/python --reinstall-package noapi-google-search-mcp "${MCP_FORK_URL}"
 
 echo "==> Installing Playwright Chromium (headless browser for MCP tools)"
