@@ -8,59 +8,90 @@ Run:       python3 ai_briefing.py
 Scheduled: launchd via com.user.ai-briefing.plist
 """
 
-import json, re, sys, smtplib, os
+import json, re, sys, smtplib, os, time, subprocess
 import urllib.request, urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+# Force UTF-8 output so emoji/arrows in logs don't crash on Windows consoles
+# using legacy code pages (e.g. cp874 on Thai-locale Windows).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+# ── LOAD .env (if present) ─────────────────────────────────────────────────────
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path, encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 # ── CONFIGURATION ──────────────────────────────────────────────────────────────
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-def _load_env():
-    """Load key=value pairs from .env next to this script (no external deps)."""
-    env_path = os.path.join(SCRIPT_DIR, ".env")
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    os.environ.setdefault(key.strip(), value.strip())
-
-_load_env()
-
 MAXPLUS_API_KEY    = os.environ.get("MAXPLUS_API_KEY", "")
-MAXPLUS_MODEL      = "gemini-3.5-flash"           # Gemini 3.5 Flash — latest
-GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS", "")
+MAXPLUS_MODEL      = os.environ.get("MAXPLUS_MODEL",   "gemini-3.5-flash")
+GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY",  "")
+GEMINI_MODEL       = os.environ.get("GEMINI_MODEL",    "gemini-3.5-flash")
+GMAIL_ADDRESS      = os.environ.get("GMAIL_ADDRESS",   "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 RECIPIENT_EMAIL    = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
 
 _missing = [name for name, val in [
-    ("MAXPLUS_API_KEY", MAXPLUS_API_KEY),
     ("GMAIL_ADDRESS", GMAIL_ADDRESS),
     ("GMAIL_APP_PASSWORD", GMAIL_APP_PASSWORD),
 ] if not val]
 if _missing:
     sys.exit(f"ERROR — missing config: {', '.join(_missing)}. Copy .env.example to .env and fill it in.")
 
-# Deduplication cache (stores URLs seen in last 7 days)
-CACHE_FILE = os.path.expanduser("~/workspace/dev/ai-briefing/.seen_cache.json")
+# Browser-like User-Agent so Reddit and other anti-bot hosts don't 429/403 us
+USER_AGENT = "Mozilla/5.0 (compatible; Jarkius-AIBriefing/1.0; +https://jarkius.local)"
+
+# Deduplication cache (stores URLs seen in last 7 days), kept next to this script
+CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".seen_cache.json")
 CACHE_DAYS = 7  # Only show items not seen in last 7 days
 
 RSS_FEEDS = [
+    # ── Official Frontier Labs & Infrastructure (primary sources) ──────────────
+    # NOTE: Anthropic discontinued its native RSS feed (404) — covered via HN/news feeds instead.
+    "https://openai.com/news/rss.xml",                              # OpenAI Blog
+    "https://deepmind.google/blog/rss.xml",                         # Google DeepMind
+    "https://blog.google/technology/ai/rss/",                       # Google AI blog
+    "https://huggingface.co/blog/feed.xml",                         # Hugging Face blog
+    "https://blog.langchain.dev/rss/",                              # LangChain blog
+    "https://developer.nvidia.com/blog/feed/",                      # NVIDIA technical blog
+    "https://pytorch.org/feed.xml",                                 # PyTorch official blog
+
+    # ── Technical Newsletters & Editorials ─────────────────────────────────────
+    "https://www.latent.space/feed",                               # Latent Space (Swyx & Alessio)
+    "https://aheadofai.substack.com/feed",                         # Ahead of AI (Sebastian Raschka)
+    "https://importai.substack.com/feed",                          # Import AI (Jack Clark)
+    "https://rss.beehiiv.com/feeds/tl-dr-ai.xml",                  # TLDR AI
+    "https://www.deeplearning.ai/the-batch/feed/",                 # DeepLearning.AI - The Batch
+
+    # ── General AI News / Media ────────────────────────────────────────────────
     "https://techcrunch.com/category/artificial-intelligence/feed/",
     "https://venturebeat.com/category/ai/feed/",
     "https://feeds.arstechnica.com/arstechnica/technology-lab",
     "https://www.artificialintelligence-news.com/feed/",           # AI News
     "https://www.marktechpost.com/feed/",                           # ML/AI research & tutorials
-    "https://blog.google/technology/ai/rss/",                       # Google AI blog
-    "https://huggingface.co/blog/feed.xml",                         # Hugging Face blog
-    "https://pytorch.org/feed.xml",                                 # PyTorch official blog
-    "https://www.deeplearning.ai/the-batch/rss/",                   # DeepLearning.AI - The Batch (correct URL)
-    "https://hnrss.org/newest?q=AI+OR+LLM+OR+Machine+Learning",   # HackerNews AI RSS (hnrss.org mirror)
-    "http://export.arxiv.org/rss/cs.LG",                            # arXiv Machine Learning papers
+
+    # ── Developer Communities & Firehose ───────────────────────────────────────
+    "https://www.reddit.com/r/LocalLLaMA/hot.rss?limit=15",        # r/LocalLLaMA (local inference, quant, hardware)
+    "https://www.reddit.com/r/MachineLearning/hot.rss?limit=10",   # r/MachineLearning (papers, benchmarks)
+    "https://hnrss.org/frontpage?q=LLM+OR+AI&points=50",           # HackerNews AI, filtered 50+ points
+    # NOTE: github-trending-rss.glitch.me is dead (410 Gone). GitHub trending is
+    # already covered natively by fetch_github_trending(), so no RSS bridge needed.
+
+    # ── Research Papers (arXiv) ────────────────────────────────────────────────
+    "http://export.arxiv.org/rss/cs.CL",                            # Computation & Language (LLM papers)
+    "http://export.arxiv.org/rss/cs.AI",                            # Artificial Intelligence (general)
+    "http://export.arxiv.org/rss/cs.LG",                            # Machine Learning
 ]
 
 AI_KEYWORDS = [
@@ -239,27 +270,48 @@ def fetch_rss(url: str, limit: int = 6) -> list[dict]:
     Fetch and parse an RSS 2.0 or Atom feed with robust error handling.
     Handles malformed XML by catching parse errors gracefully.
     """
-    try:
-        # Use proper User-Agent to avoid 403s
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "python:ai-briefing:v1.0 (AI newsletter aggregator)"}
-        )
-        with urllib.request.urlopen(req, timeout=15) as r:
-            raw_xml = r.read()
+    host = url.split('/')[2] if '//' in url else url
+    # Browser-like headers: Reddit (429) and others reject default urllib agents.
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+    )
 
-        # Try parsing with ET - catches most malformed XML
+    raw_xml = None
+    # Retry once on transient errors (429 rate-limit, 500/502/503 gateway hiccups
+    # — e.g. hnrss.org 502, LangChain Ghost CMS truncation).
+    for attempt in (1, 2):
         try:
-            root = ET.fromstring(raw_xml)
-        except ET.ParseError as e:
-            log(f"  RSS {url.split('/')[2]} failed: XML parse error - {e}")
+            with urllib.request.urlopen(req, timeout=15) as r:
+                raw_xml = r.read()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503) and attempt == 1:
+                log(f"  RSS {host} HTTP {e.code} — retrying in 3s…")
+                time.sleep(3)
+                continue
+            log(f"  RSS {host} failed: HTTP {e.code}")
+            return []
+        except Exception as e:
+            if attempt == 1:
+                log(f"  RSS {host} error ({e}) — retrying in 3s…")
+                time.sleep(3)
+                continue
+            log(f"  RSS {host} failed: {e}")
             return []
 
-    except urllib.error.HTTPError as e:
-        log(f"  RSS {url.split('/')[2]} failed: HTTP {e.code}")
+    if raw_xml is None:
         return []
-    except Exception as e:
-        log(f"  RSS {url.split('/')[2]} failed: {e}")
+
+    # Try parsing with ET - catches most malformed XML
+    try:
+        root = ET.fromstring(raw_xml)
+    except ET.ParseError as e:
+        log(f"  RSS {host} failed: XML parse error - {e}")
         return []
 
     items = []
@@ -286,8 +338,47 @@ def fetch_rss(url: str, limit: int = 6) -> list[dict]:
 
 # ── AI SUMMARISATION (Grok via maxplus) ────────────────────────────────────────
 
-def _grok_call(system: str, user: str) -> str:
-    """Single Gemini API call, max 4000 tokens."""
+def _claude_cli_call(system: str, user: str) -> str:
+    """Call Claude via `claude -p` CLI, piping prompt via stdin to avoid arg-length limits."""
+    prompt = f"{system}\n\n{user}"
+    result = subprocess.run(
+        ["claude", "-p", "--model", "opus", "-"],
+        input=prompt,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=300,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude -p exited {result.returncode}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def _gemini_direct_call(system: str, user: str) -> str:
+    """Call Google Gemini directly via REST API (fallback #1)."""
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": f"{system}\n\n{user}"}]}],
+        "generationConfig": {"maxOutputTokens": 4000},
+    }
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    )
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read())
+    # Thinking models include parts without "text" (e.g. thoughtSignature) — skip them
+    parts = data["candidates"][0]["content"]["parts"]
+    return next(p["text"] for p in parts if "text" in p)
+
+
+def _maxplus_call(system: str, user: str) -> str:
+    """Call Gemini via MaxPlus API (fallback #2)."""
     payload = {
         "model": MAXPLUS_MODEL,
         "messages": [
@@ -310,6 +401,27 @@ def _grok_call(system: str, user: str) -> str:
     return data["choices"][0]["message"]["content"]
 
 
+_claude_cli_disabled = False  # set True after first cert failure to skip on subsequent calls
+
+def _grok_call(system: str, user: str) -> str:
+    """Try Claude CLI → direct Gemini API → MaxPlus Gemini (in order)."""
+    global _claude_cli_disabled
+    if not _claude_cli_disabled:
+        try:
+            return _claude_cli_call(system, user)
+        except Exception as e:
+            err = str(e)[:120]
+            log(f"  Claude CLI failed ({err}) — trying direct Gemini API…")
+            if "nscacert" in err or "exit 3" in err or "exited 3" in err:
+                _claude_cli_disabled = True
+                log("  Claude CLI disabled for this run (cert issue)")
+    try:
+        return _gemini_direct_call(system, user)
+    except Exception as e:
+        log(f"  Direct Gemini failed ({str(e)[:120]}) — falling back to MaxPlus…")
+        return _maxplus_call(system, user)
+
+
 def call_ai(raw_data: str, date: str) -> str:
     """Six focused Gemini calls to generate comprehensive briefing."""
 
@@ -326,9 +438,13 @@ def call_ai(raw_data: str, date: str) -> str:
     sanitized = re.sub(r'(?<!\()(https?://[^\s\)]+)(?!\))', '', raw_data)
     sanitized = re.sub(r'\b(exploit|0-day|hack|bypass|malware)\b', '[security-related]', sanitized, flags=re.IGNORECASE)
 
-    # DEBUG: write sanitized payload
-    with open("/Users/jarkius/workspace/dev/ai-briefing/debug_sanitized.txt", "w") as f:
-        f.write(sanitized)
+    # DEBUG: write sanitized payload (relative to this script; never fatal)
+    try:
+        _debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_sanitized.txt")
+        with open(_debug_path, "w", encoding="utf-8") as f:
+            f.write(sanitized)
+    except Exception as _e:
+        log(f"  (debug write skipped: {_e})")
 
     ctx = f"Today is {date}.\n\nRAW DATA (HackerNews, RSS, GitHub, Reddit):\n{sanitized}"
     base_rules = "Rules: factual, plain language, mark rumours, include all source links from the data."
@@ -485,120 +601,245 @@ What the community is discussing (3-4 sentences)
 
 def _inline(text: str) -> str:
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
-                  r'<a href="\2" style="color:#3b82f6">\1</a>', text)
+                  r'<a href="\2" style="color:#26890D">\1</a>', text)
     text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'\*([^*]+)\*',     r'<em>\1</em>',         text)
     return text
 
 
+# Section → (tag label, tag colour, accent colour)
+_SECTION_STYLES = {
+    "top 3":       ("🔥 Top Stories",        "#D04A02", "#D04A02"),
+    "news":        ("📰 AI News",             "#00A3E0", "#00A3E0"),
+    "governance":  ("🏛️ Governance & Policy", "#6B21A8", "#6B21A8"),
+    "mindset":     ("🧠 Mindset & Culture",   "#0369A1", "#0369A1"),
+    "learning":    ("📚 Learning",             "#26890D", "#26890D"),
+    "prompt":      ("🎯 Prompt Engineering",  "#0D9488", "#0D9488"),
+    "security":    ("🔒 Security & Privacy",  "#B91C1C", "#B91C1C"),
+    "ethics":      ("⚖️ Ethics",              "#92400E", "#B45309"),
+    "research":    ("🔬 Research",             "#1D4ED8", "#1D4ED8"),
+    "tools":       ("💻 Tools & Resources",   "#26890D", "#26890D"),
+    "community":   ("💬 Community",           "#5B21B6", "#5B21B6"),
+}
+
+def _section_style(header_text: str):
+    h = header_text.lower()
+    for key, val in _SECTION_STYLES.items():
+        if key in h:
+            return val
+    return ("📋 Briefing", "#26890D", "#26890D")
+
+
 def markdown_to_html(text: str, date_str: str) -> str:
-    """Convert markdown to newsletter-ready HTML with icons, hashtags, and social-ready formatting."""
-    lines, parts = text.split("\n"), []
+    """Convert briefing markdown to AI Pulse-style newsletter HTML."""
+    lines = text.split("\n")
+    articles = []   # list of rendered <tr> blocks
     i = 0
+    current_section = ("📋 Briefing", "#26890D", "#26890D")
 
     while i < len(lines):
         s = lines[i].strip()
 
-        # Section headers with emoji icons
+        # ── Section header → update current tag style, emit section divider row
         if s.startswith("## "):
-            parts.append(
-                f'<div style="margin:32px 0 20px;padding:16px;background:#f8fafc;border-left:4px solid #3b82f6;border-radius:8px">'
-                f'<h2 style="color:#1e293b;margin:0;font-size:20px;font-weight:600">{_inline(s[3:])}</h2>'
-                f'</div>'
-            )
+            header_text = s[3:]
+            current_section = _section_style(header_text)
+            tag_label, tag_color, accent = current_section
+            articles.append(f"""
+  <tr><td style="padding:20px 28px 0 28px;">
+    <p style="margin:0 0 4pt 0;font-size:8pt;font-weight:bold;letter-spacing:1pt;
+              text-transform:uppercase;display:inline-block;padding:3px 10px;
+              border-radius:2px;color:white;background:{tag_color};">&#9632; {tag_label}</p>
+    <h2 style="margin:6pt 0 0 0;font-size:13pt;font-weight:bold;color:{accent};
+               text-transform:uppercase;letter-spacing:.3pt;border-bottom:2px solid {accent};
+               padding-bottom:6pt;">{_inline(header_text)}</h2>
+  </td></tr>""")
 
-        # Story/item blocks with visual structure
+        # ── Story card (bold headline)
         elif s.startswith("**") and "**" in s[2:]:
-            # Extract headline
             end_idx = s.index("**", 2)
             headline = s[2:end_idx]
             rest = s[end_idx+2:].strip()
+            _, _, accent = current_section
 
-            # Build story card
-            card = f'<div style="margin:24px 0;padding:20px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">'
-            card += f'<h3 style="margin:0 0 12px;color:#0f172a;font-size:18px;font-weight:600;line-height:1.4">{_inline(headline)}</h3>'
-
-            # Body paragraphs
             body_lines = [rest] if rest else []
             i += 1
             while i < len(lines):
-                next_line = lines[i].strip()
-                if next_line.startswith(("**", "## ", "📱", "---", "")) or next_line.startswith("#"):
+                nl = lines[i].strip()
+                if nl.startswith(("**", "## ", "---")) or (nl == "" and i + 1 < len(lines) and lines[i+1].strip().startswith("**")):
                     break
-                body_lines.append(next_line)
+                body_lines.append(nl)
                 i += 1
             i -= 1
 
-            # Format body with spacing
-            for body_line in body_lines:
-                if body_line.startswith("**Key"):
-                    card += f'<div style="margin:12px 0 8px;padding:10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px"><strong style="color:#92400e">💡 {_inline(body_line[2:])}</strong></div>'
-                elif body_line.startswith("**Why"):
-                    card += f'<div style="margin:12px 0 8px;padding:10px;background:#dbeafe;border-left:3px solid #3b82f6;border-radius:4px"><strong style="color:#1e40af">🎯 {_inline(body_line[2:])}</strong></div>'
-                elif body_line.startswith("📱"):
-                    # Social post callout
-                    social = body_line.replace("📱 Social post:", "").replace("📱", "").strip()
-                    card += f'<div style="margin:16px 0 8px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px">'
-                    card += f'<div style="color:#15803d;font-size:13px;font-weight:600;margin-bottom:6px">📱 READY TO SHARE</div>'
-                    card += f'<div style="color:#166534;font-size:14px;line-height:1.5">{_inline(social)}</div>'
-                    card += '</div>'
-                elif body_line.startswith("[Source]") or body_line.startswith("Source:"):
-                    # Source link
-                    card += f'<div style="margin:12px 0 0;padding-top:12px;border-top:1px solid #e2e8f0"><span style="font-size:12px;color:#64748b">🔗 {_inline(body_line)}</span></div>'
-                elif "#" in body_line and body_line.startswith("#"):
-                    # Hashtags
-                    card += f'<div style="margin:8px 0 0"><span style="font-size:13px;color:#3b82f6">{_inline(body_line)}</span></div>'
+            body_html = ""
+            for bl in body_lines:
+                if not bl:
+                    continue
+                # Key takeaway / Why it matters → green-border callout
+                if re.match(r'\*\*(Key takeaway|Why it matters|Action to take|What to consider|Key insight|Key feature)[:\*]', bl, re.I):
+                    label = re.sub(r'\*\*([^*]+)\*\*.*', r'\1', bl)
+                    rest_bl = re.sub(r'\*\*[^*]+\*\*:?\s*', '', bl).strip()
+                    body_html += f"""
+        <table border=0 cellspacing=0 cellpadding=0 width="100%" style="border-collapse:collapse;margin:10pt 0 0 0;">
+          <tr><td style="background:#f5f9f0;padding:10px 14px;border-left:3px solid {accent};">
+            <p style="margin:0;font-size:10pt;color:{accent};font-weight:bold;">{label}:</p>
+            <p style="margin:4pt 0 0 0;font-size:10pt;color:#1a1a1a;">{_inline(rest_bl)}</p>
+          </td></tr>
+        </table>"""
+                # Social post → subtle grey box
+                elif bl.startswith("📱"):
+                    social = re.sub(r'^📱\s*(Social post:?)?\s*', '', bl).strip()
+                    body_html += f"""
+        <table border=0 cellspacing=0 cellpadding=0 width="100%" style="border-collapse:collapse;margin:10pt 0 0 0;">
+          <tr><td style="background:#f8f8f8;padding:8px 12px;border-left:3px solid #ccc;">
+            <p style="margin:0;font-size:8pt;font-weight:bold;color:#888;letter-spacing:.5pt;">📱 SHARE-READY POST</p>
+            <p style="margin:4pt 0 0 0;font-size:10pt;color:#444;">{_inline(social)}</p>
+          </td></tr>
+        </table>"""
+                # Source link
+                elif re.match(r'\[Source', bl) or bl.startswith("Source:") or bl.startswith("[Source"):
+                    body_html += f'<p style="margin:8pt 0 0 0;font-size:9pt;color:#888;">🔗 {_inline(bl)}</p>'
                 else:
-                    card += f'<p style="margin:8px 0;color:#334155;line-height:1.7">{_inline(body_line)}</p>'
+                    body_html += f'<p style="margin:0 0 6pt 0;font-size:11pt;color:#1a1a1a;line-height:1.6;">{_inline(bl)}</p>'
 
-            card += '</div>'
-            parts.append(card)
+            articles.append(f"""
+  <tr><td style="padding:16px 28px 8px 28px;">
+    <h3 style="margin:0 0 8pt 0;font-size:12pt;font-weight:bold;color:#0f172a;line-height:1.4;">{_inline(headline)}</h3>
+    {body_html}
+  </td></tr>
+  <tr><td style="padding:4px 28px;"><div style="border-top:1px solid #eee;"></div></td></tr>""")
 
-        # Section dividers
+        # ── Section divider (---) → spacer row
         elif s == "---":
-            parts.append('<hr style="border:none;border-top:2px solid #e2e8f0;margin:32px 0">')
+            articles.append("""
+  <tr><td style="padding:12px 28px;">
+    <div style="border-top:2px solid #86BC25;"></div>
+  </td></tr>""")
 
-        # Regular paragraphs
+        # ── Regular paragraph (intro note, etc.)
         elif s and not s.startswith(("##", "**", "📱", "#")):
-            parts.append(f'<p style="margin:12px 0;color:#475569;line-height:1.7">{_inline(s)}</p>')
+            articles.append(f"""
+  <tr><td style="padding:4px 28px;">
+    <p style="margin:0 0 6pt 0;font-size:11pt;color:#555;font-style:italic;line-height:1.6;">{_inline(s)}</p>
+  </td></tr>""")
 
         i += 1
 
-    body = "\n".join(parts)
+    body_rows = "\n".join(articles)
+
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
-             max-width:680px;margin:0 auto;padding:20px;background:#f8fafc">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style>
+body {{margin:0;padding:0;background:#F2F2F2;font-family:"Aptos",Calibri,sans-serif;}}
+p {{margin:0 0 8pt 0;font-size:11pt;color:#1a1a1a;line-height:1.6;}}
+h2 {{margin:14pt 0 6pt 0;font-size:12pt;font-weight:bold;color:#26890D;text-transform:uppercase;letter-spacing:.3pt;}}
+a {{color:#26890D;}}
+</style>
+</head>
+<body bgcolor="#F2F2F2">
+<table border=0 cellspacing=0 cellpadding=0 width=600 align=center style="background:#F2F2F2;border-collapse:collapse;">
 
-  <!-- Header -->
-  <div style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:28px 32px;border-radius:16px;margin-bottom:32px;box-shadow:0 4px 6px rgba(0,0,0,0.1)">
-    <h1 style="color:#fff;margin:0;font-size:26px;font-weight:700;letter-spacing:-0.5px">🤖 Daily AI Briefing</h1>
-    <p style="color:#cbd5e1;margin:8px 0 0;font-size:14px">{date_str}</p>
-  </div>
+  <!-- BREADCRUMB -->
+  <tr>
+    <td style="padding:6px 20px 4px 20px;background:#F2F2F2;">
+      <p style="margin:0;font-size:7pt;color:#7F7F7F;line-height:1.5;">Southeast Asia &nbsp;|&nbsp; Information Technology &nbsp;|&nbsp; {date_str}</p>
+    </td>
+  </tr>
 
-  <!-- Content -->
-  <div style="background:#ffffff;padding:32px;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
-    {body}
-  </div>
+  <!-- MASTHEAD -->
+  <tr>
+    <td style="padding:0 5px 5px 5px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="background:#0f172a;border-collapse:collapse;">
+        <tr>
+          <td style="padding:22px 28px 24px 28px;">
+            <p style="margin:0 0 4pt 0;font-size:20pt;font-weight:bold;color:white;letter-spacing:-0.5pt;">🤖 Daily AI Briefing</p>
+            <p style="margin:0 0 6pt 0;font-size:11pt;color:#94a3b8;font-style:italic;">What happened in AI today — curated for SEA IT</p>
+            <p style="margin:0;font-size:8pt;color:#475569;border-top:1px solid #334155;padding-top:8pt;">{date_str} &nbsp;&#8226;&nbsp; Sources: HackerNews · RSS · GitHub</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
 
-  <!-- Footer -->
-  <div style="margin-top:32px;padding:20px;text-align:center;color:#94a3af;font-size:13px;background:#ffffff;border-radius:12px">
-    <p style="margin:0 0 8px"><strong>Sources:</strong> HackerNews · RSS Feeds · GitHub · Gemini AI</p>
-    <p style="margin:0">Curated by AI · Delivered with ❤️</p>
-  </div>
+  <!-- BODY -->
+  <tr>
+    <td style="padding:0 5px 5px 5px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="background:white;border-collapse:collapse;">
+        <tr><td style="border-top:3px solid #86BC25;padding:0;"></td></tr>
+        {body_rows}
+        <tr><td style="padding:16px 28px 24px 28px;">
+          <p style="margin:0;font-size:9pt;color:#94a3b8;">This briefing is AI-generated from public sources. Verify before acting on any item.</p>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
 
+  <!-- FOOTER -->
+  <tr>
+    <td style="padding:16px 20px 20px 20px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="border-collapse:collapse;">
+        <tr>
+          <td style="padding:16px 20px;background:#1a1a1a;text-align:center;">
+            <p style="margin:0 0 4pt 0;font-size:9pt;color:#86BC25;font-weight:bold;letter-spacing:.5pt;text-transform:uppercase;">SEA IT · AI Hub</p>
+            <p style="margin:0 0 4pt 0;font-size:8pt;color:#aaa;">This communication is intended solely for Deloitte SEA IT personnel.</p>
+            <p style="margin:0;font-size:8pt;color:#666;">Confidential — For Internal Use Only &nbsp;&#8226;&nbsp; &copy; Deloitte {date_str[-4:]}</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
 </body></html>"""
 
 
 # ── GMAIL SMTP ─────────────────────────────────────────────────────────────────
 
 def send_email(subject: str, html: str) -> None:
+    """Send via Gmail SMTP (primary — works on macOS).
+    Falls back to Outlook COM on Windows when Netskope blocks SMTP."""
+    try:
+        _send_via_gmail(subject, html)
+    except Exception as e:
+        log(f"  Gmail SMTP failed ({str(e)[:120]}) — falling back to Outlook COM…")
+        _send_via_outlook(subject, html)
+
+
+def _send_via_outlook(subject: str, html: str) -> None:
+    """Send using local Outlook client via PowerShell COM automation."""
+    # Write HTML to a temp file to avoid escaping issues in PS args
+    tmp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tmp_email.html")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(html)
+    tmp_ps = tmp.replace("\\", "\\\\")
+    ps = f"""
+$ol = New-Object -ComObject Outlook.Application
+$mail = $ol.CreateItem(0)
+$mail.To       = "{RECIPIENT_EMAIL}"
+$mail.Subject  = "{subject.replace('"', "'")}"
+$mail.HTMLBody = [IO.File]::ReadAllText("{tmp_ps}")
+$mail.Send()
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True, text=True, timeout=60
+    )
+    os.remove(tmp)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip()[:200])
+
+
+def _send_via_gmail(subject: str, html: str) -> None:
+    """Send via Gmail SMTP (fallback — may be blocked by corporate firewall)."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = f"AI Briefing <{GMAIL_ADDRESS}>"
     msg["To"]      = RECIPIENT_EMAIL
     msg.attach(MIMEText(html, "html"))
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
         server.ehlo()
         server.starttls()
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
@@ -646,8 +887,10 @@ def filter_new_items(items: list[dict], cache: dict, url_key: str = 'url') -> li
 
 
 def main():
-    today    = datetime.now().strftime("%Y-%m-%d")
-    date_str = datetime.now().strftime("%A, %B %-d, %Y")
+    _now     = datetime.now()
+    today    = _now.strftime("%Y-%m-%d")
+    # Build without %-d / %#d so it works on both Windows and Unix
+    date_str = f"{_now.strftime('%A, %B')} {_now.day}, {_now.year}"
 
     # Load deduplication cache
     log("Loading seen-items cache…")
@@ -699,24 +942,24 @@ def main():
     # Build raw context string
     lines = ["=== HACKER NEWS TOP AI STORIES ==="]
     for s in hn:
-        lines.append(f"- {s['title']} (score:{s['score']}) — {s['url']}")
+        lines.append(f"- [{s['title']}]({s['url']}) (score:{s['score']})")
 
     lines.append("\n=== RSS FEED STORIES ===")
     for item in rss_items:
-        lines.append(f"- {item['title']} — {item['url']}")
+        lines.append(f"- [{item['title']}]({item['url']})")
         if item["desc"]:
             lines.append(f"  {item['desc']}")
 
     lines.append("\n=== GITHUB TRENDING AI REPOS ===")
     for r in gh_repos:
         lang = r.get('lang', 'Unknown')
-        lines.append(f"- {r['name']} ⭐{r['stars']:,} ({lang}) — {r['url']}")
+        lines.append(f"- [{r['name']}]({r['url']}) ⭐{r['stars']:,} ({lang})")
         if r.get("desc"):
             lines.append(f"  {r['desc']}")
 
     lines.append("\n=== REDDIT AI COMMUNITY (hot posts) ===")
     for p in reddit_posts:
-        lines.append(f"- [r/{p['sub']}] {p['title']} (score:{p['score']}, {p['comments']} comments) — {p['url']}")
+        lines.append(f"- [r/{p['sub']}] [{p['title']}]({p['url']}) (score:{p['score']}, {p['comments']} comments)")
 
     if twitter_trends:
         lines.append("\n=== TWITTER/X AI BUZZ (24h) ===")
@@ -726,7 +969,7 @@ def main():
     if ph_products:
         lines.append("\n=== PRODUCT HUNT AI LAUNCHES ===")
         for prod in ph_products:
-            lines.append(f"- {prod['name']} — {prod['url']}")
+            lines.append(f"- [{prod['name']}]({prod['url']})")
 
     raw = "\n".join(lines)
     log(f"Collected {len(hn)} HN + {len(rss_items)} RSS + {len(gh_repos)} GitHub + {len(reddit_posts)} Reddit + {len(twitter_trends)} Twitter + {len(ph_products)} ProductHunt items. Sending to Gemini…")
@@ -761,20 +1004,20 @@ def main():
         log(f"Email 2: {len(email2_content):,} chars (Technical & Community)")
 
         # Save markdown files for archiving and future LLM use
-        archive_dir = os.path.expanduser("~/workspace/dev/ai-briefing/archives")
+        archive_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "archives")
         os.makedirs(archive_dir, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
 
         # Save split versions only
         part1_md_path = os.path.join(archive_dir, f"briefing_{timestamp}_part1_news.md")
-        with open(part1_md_path, 'w') as f:
+        with open(part1_md_path, 'w', encoding='utf-8') as f:
             f.write(f"# AI Briefing Part 1: News & Learning — {date_str}\n\n")
             f.write(email1_content)
         log(f"✓ Saved Part 1: {part1_md_path}")
 
         part2_md_path = os.path.join(archive_dir, f"briefing_{timestamp}_part2_technical.md")
-        with open(part2_md_path, 'w') as f:
+        with open(part2_md_path, 'w', encoding='utf-8') as f:
             f.write(f"# AI Briefing Part 2: Technical & Community — {date_str}\n\n")
             f.write(email2_content)
         log(f"✓ Saved Part 2: {part2_md_path}")
