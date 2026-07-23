@@ -12,6 +12,7 @@ credentials.json
 briefing.log
 briefing_error.log
 debug_*.txt
+logs/
 
 # Python
 __pycache__/
@@ -35,6 +36,9 @@ archive/test-runs/
 .idea/
 *.swp
 *.swo
+
+# Claude Code local agent state
+.omc/
 
 # OS
 .DS_Store

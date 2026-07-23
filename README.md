@@ -64,8 +64,9 @@ cp .env.example .env
 ```
 
 ```dotenv
+GEMINI_API_KEY=your-google-gemini-api-key   # optional fallback #1
 MAXPLUS_API_KEY=ccsk-your-api-key-here
-MAXPLUS_MODEL=gpt-5.5           # check your maxplus pool's available models
+MAXPLUS_MODEL=gemini-3.5-flash        # check your maxplus pool's available models
 GMAIL_ADDRESS=your-email@gmail.com
 GMAIL_APP_PASSWORD=your-app-password
 RECIPIENT_EMAIL=recipient@gmail.com   # optional, defaults to GMAIL_ADDRESS
@@ -114,6 +115,27 @@ launchctl load ~/Library/LaunchAgents/com.user.ai-briefing.plist
 ```
 
 Runs daily at 06:00. Logs to `briefing.log` / `briefing_error.log`.
+
+### Scheduled Run (Windows)
+
+Use Windows Task Scheduler with the included wrapper scripts:
+
+1. Copy `.env.example` to `.env` and fill in your credentials (see Configuration above).
+2. Right-click `setup_task.bat` → **Run as administrator**. This registers a daily task
+   (`\ai\AI Briefing Daily`) that runs `run_briefing.bat`, which in turn calls
+   `ai_briefing.py` and logs output to `logs\briefing_YYYY-MM-DD.log`.
+3. If the task needs to survive screen lock/logoff, or run on battery, use
+   `fix_task_settings.ps1` (run from an elevated PowerShell prompt) to switch the task's
+   power/logon settings.
+
+**Email delivery on corporate networks:** if a proxy/DLP agent (e.g. Netskope) blocks
+outbound Gmail SMTP, `ai_briefing.py` automatically falls back to sending via a local
+Outlook client through PowerShell COM automation. This fallback requires Outlook to be
+installed and an interactive desktop session — it will not work if the scheduled task
+is set to "Run whether user is logged on or not."
+
+**Note:** the Windows wrapper scripts currently invoke the legacy `ai_briefing.py`
+pipeline — they have not yet been updated to the new `run.py` orchestrator.
 
 ## Two-computer workflow
 
