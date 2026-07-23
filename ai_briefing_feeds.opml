@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Jarkius AI Briefing - Master RSS Feeds</title>
+    <dateCreated>Tue, 21 Jul 2026 14:08:00 GMT</dateCreated>
+    <ownerName>Juckrit Sanitareephon</ownerName>
+  </head>
+  <body>
+    <!-- Category 1: Official Frontier Labs & Infra -->
+    <outline text="Official Labs &amp; Infrastructure" title="Official Labs &amp; Infrastructure">
+      <outline type="rss" text="OpenAI Blog" title="OpenAI Blog" xmlUrl="https://openai.com/news/rss.xml" htmlUrl="https://openai.com/news"/>
+      <outline type="rss" text="Google DeepMind" title="Google DeepMind" xmlUrl="https://deepmind.google/blog/rss.xml" htmlUrl="https://deepmind.google/blog"/>
+      <outline type="rss" text="Hugging Face Blog" title="Hugging Face Blog" xmlUrl="https://huggingface.co/blog/feed.xml" htmlUrl="https://huggingface.co/blog"/>
+      <outline type="rss" text="LangChain Blog" title="LangChain Blog" xmlUrl="https://blog.langchain.dev/rss/" htmlUrl="https://blog.langchain.dev"/>
+      <outline type="rss" text="NVIDIA Technical Blog" title="NVIDIA Technical Blog" xmlUrl="https://developer.nvidia.com/blog/feed/" htmlUrl="https://developer.nvidia.com/blog"/>
+    </outline>
+    <!-- Category 2: Technical Newsletters & Editorials -->
+    <outline text="Technical Newsletters" title="Technical Newsletters">
+      <outline type="rss" text="Latent Space (Swyx &amp; Alessio)" title="Latent Space" xmlUrl="https://www.latent.space/feed" htmlUrl="https://www.latent.space"/>
+      <outline type="rss" text="Ahead of AI (Sebastian Raschka)" title="Ahead of AI" xmlUrl="https://aheadofai.substack.com/feed" htmlUrl="https://aheadofai.substack.com"/>
+      <outline type="rss" text="Import AI (Jack Clark)" title="Import AI" xmlUrl="https://importai.substack.com/feed" htmlUrl="https://importai.substack.com"/>
+      <outline type="rss" text="TLDR AI" title="TLDR AI" xmlUrl="https://rss.beehiiv.com/feeds/tl-dr-ai.xml" htmlUrl="https://tldr.tech/ai"/>
+      <outline type="rss" text="The Batch (DeepLearning.AI)" title="The Batch" xmlUrl="https://www.deeplearning.ai/the-batch/feed/" htmlUrl="https://www.deeplearning.ai/the-batch"/>
+    </outline>
+    <!-- Category 3: Developer Communities & Firehose -->
+    <outline text="Developer Communities" title="Developer Communities">
+      <outline type="rss" text="Reddit - r/LocalLLaMA (Hot)" title="r/LocalLLaMA" xmlUrl="https://www.reddit.com/r/LocalLLaMA/hot.rss?limit=15" htmlUrl="https://www.reddit.com/r/LocalLLaMA"/>
+      <outline type="rss" text="Reddit - r/MachineLearning (Hot)" title="r/MachineLearning" xmlUrl="https://www.reddit.com/r/MachineLearning/hot.rss?limit=10" htmlUrl="https://www.reddit.com/r/MachineLearning"/>
+      <outline type="rss" text="HackerNews AI (Filtered 50+ Points)" title="HackerNews AI" xmlUrl="https://hnrss.org/frontpage?q=LLM+OR+AI&amp;points=50" htmlUrl="https://news.ycombinator.com"/>
+    </outline>
+    <!-- Category 4: Research Papers (ArXiv) -->
+    <outline text="Research Papers" title="Research Papers">
+      <outline type="rss" text="arXiv - Computation and Language (cs.CL)" title="arXiv cs.CL" xmlUrl="http://export.arxiv.org/rss/cs.CL" htmlUrl="https://arxiv.org/list/cs.CL/recent"/>
+      <outline type="rss" text="arXiv - Artificial Intelligence (cs.AI)" title="arXiv cs.AI" xmlUrl="http://export.arxiv.org/rss/cs.AI" htmlUrl="https://arxiv.org/list/cs.AI/recent"/>
+      <outline type="rss" text="arXiv - Machine Learning (cs.LG)" title="arXiv cs.LG" xmlUrl="http://export.arxiv.org/rss/cs.LG" htmlUrl="https://arxiv.org/list/cs.LG/recent"/>
+    </outline>
+  </body>
+</opml>
