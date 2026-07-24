@@ -69,3 +69,7 @@ Not started beyond scaffolding — `src/panel/` has only empty `__init__.py`, `s
 
 ### 2026-07-22
 - Committed MCP integration plan (`f593ab1`) and control panel plan (`98749bd`); POC of noapi-google-search-mcp tested and documented (`88073ef`).
+
+### Network facts (confirmed 2026-07-24)
+- **Office network allows ONLY port 443** — Gmail SMTP (465/587) and IMAP (993) TLS handshakes are reset; Gemini API over 443 works fine. Confirmed by A/B test: same send failed on office network, succeeded instantly on mobile hotspot (both parts delivered).
+- Consequence: scheduled 5am send only works when the Mac is NOT on the office network, until a Gmail-API-over-443 send fallback is implemented (needs one-time OAuth consent from user).
