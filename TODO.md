@@ -17,7 +17,8 @@ Code-complete; acceptance bar not fully met.
 - [x] End-to-end runs: 3 archives on 2026-07-23 (`archives/briefing_2026-07-23_*.md`)
 
 ### Pending
-- [ ] **⚠️ BLOCKER for 5am email: AI provider credit/key — USER ACTION REQUIRED.** Confirmed live at the 2026-07-24 05:28 scheduled run: pipeline ran perfectly (39 items collected, launchd trigger worked) but Generate failed with maxplus HTTP 402 insufficient_credit (~$0.25 needed per call) and no `GEMINI_API_KEY` in `.env` for the fallback. Fix either: top up maxplus credit at maxplus-ai.cc, OR get a free key at https://aistudio.google.com/app/apikey and add `GEMINI_API_KEY=<key>` to `.env`. Nothing in code can fix this.
+- [ ] **⚠️ Remaining risk for 5am email: Gmail SMTP/IMAP TLS-blocked on this network** (2026-07-24 daytime: TCP connects, TLS handshake reset 6/6 on :465/:993/:587; HTTPS :443 to Google works fine). Historical sends succeeded, so the block may not apply at 5am. If tomorrow's email doesn't arrive with "Connection reset by peer" in briefing.log → implement Gmail-API-over-443 send fallback (needs OAuth setup).
+- [ ] Gemini free-tier key (in .env) hit 429 daily/rate quota during 2026-07-24 testing — quota resets midnight PT (=2pm Bangkok); 5am run should have fresh quota. maxplus commented out in .env (pool no longer serves gemini models; would need MAXPLUS_MODEL=gpt-5.5 + credit top-up to re-enable).
 - [ ] AC5: offline soft-fail run (Wi-Fi off mid-collect → still exits 0, sends from DB)
 - [ ] AC7: run `scripts/check_style_marker.sh` (harness written, unexecuted — blocked on provider 402)
 - [ ] AC8: wall-clock measurement (<5 min no-video, <15 min with one transcription) — blocked on provider 402
