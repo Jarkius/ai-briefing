@@ -9,10 +9,33 @@ sequencing *within* one process; this lock is what covers *across* processes.
 """
 
 import contextlib
-import fcntl
 import os
 import sys
 import time
+
+# fcntl is Unix-only; on Windows fall back to msvcrt so importing this module
+# (run.py → collector.py → here) doesn't kill the Windows scheduled run the
+# repo also ships. Both give an exclusive, kernel-released advisory lock.
+try:
+    import fcntl
+
+    def _try_lock(fd):
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises BlockingIOError if held
+
+    def _unlock(fd):
+        fcntl.flock(fd, fcntl.LOCK_UN)
+except ImportError:  # Windows
+    import msvcrt
+
+    def _try_lock(fd):
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError as e:
+            raise BlockingIOError(str(e)) from e
+
+    def _unlock(fd):
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -24,7 +47,16 @@ def _server_params() -> StdioServerParameters:
     current config module state, and so the vendored server's FEEDS_DB_PATH
     env var support (server.py ~line 5386) points at our repo's data/
     directory instead of its own ~/.cache default."""
-    env = dict(os.environ)
+    # Minimal env, not a full os.environ copy — the vendored third-party
+    # server has no business receiving GMAIL_APP_PASSWORD or the API keys.
+    # It needs PATH/HOME (Playwright + model caches are HOME-relative,
+    # critical under launchd), locale, and our DB path override.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ")
+        or k.startswith(("PLAYWRIGHT_", "HF_", "XDG_"))
+    }
     env["FEEDS_DB_PATH"] = config.FEEDS_DB_PATH
     return StdioServerParameters(
         command=sys.executable,

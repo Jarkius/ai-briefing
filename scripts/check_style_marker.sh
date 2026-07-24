@@ -14,7 +14,11 @@ STYLE_FILE="newsletter_style.md"
 BACKUP="$(mktemp)"
 MARKER="STYLE-MARKER-42"
 
-cp "$STYLE_FILE" "$BACKUP"
+# Verify the backup actually holds the file's content BEFORE installing the
+# restore trap — a failed/empty cp followed by the trap would clobber the
+# real style file with nothing.
+cp "$STYLE_FILE" "$BACKUP" || { echo "FAIL: could not back up $STYLE_FILE" >&2; exit 1; }
+cmp -s "$STYLE_FILE" "$BACKUP" || { echo "FAIL: backup verification failed" >&2; exit 1; }
 trap 'cp "$BACKUP" "$STYLE_FILE"; rm -f "$BACKUP"' EXIT
 
 echo "" >> "$STYLE_FILE"

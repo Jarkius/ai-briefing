@@ -7,6 +7,7 @@ so the dashboard's /preview route can call it directly and get byte-identical
 output to what actually gets emailed — no second render path.
 """
 
+import html as html_lib
 import imaplib
 import re
 import smtplib
@@ -36,8 +37,18 @@ def _with_retry(fn, max_attempts: int = 3, label: str = "operation"):
 
 
 def _inline(text: str) -> str:
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
-                  r'<a href="\2" style="color:#3b82f6">\1</a>', text)
+    # Escape first: feed titles/URLs are attacker-controlled and land in a
+    # trusted daily email — raw HTML or attribute-breaking quotes must never
+    # pass through. Only http(s) links are rendered as anchors.
+    text = html_lib.escape(text, quote=True)
+
+    def _link(m):
+        label, url = m.group(1), m.group(2)
+        if not url.startswith(("http://", "https://")):
+            return label
+        return f'<a href="{url}" style="color:#3b82f6">{label}</a>'
+
+    text = re.sub(r'\[([^\]]+)\]\(([^)\s]+)\)', _link, text)
     text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text)
     return text
@@ -71,7 +82,13 @@ def markdown_to_html(text: str, date_str: str, title: str = "Daily AI Briefing")
             i += 1
             while i < len(lines):
                 next_line = lines[i].strip()
-                if next_line.startswith(("**", "## ", "📱", "---", "")) or next_line.startswith("#"):
+                # A card's body ends at the next card/section boundary: a blank
+                # line, a section header, a divider, or a new **headline** —
+                # but **Key/**Why callouts and 📱 social posts belong to THIS
+                # card and are handled by the body loop below.
+                if next_line == "" or next_line.startswith(("## ", "---")):
+                    break
+                if next_line.startswith("**") and not next_line.startswith(("**Key", "**Why")):
                     break
                 body_lines.append(next_line)
                 i += 1
@@ -168,8 +185,10 @@ def send_email(subject: str, html: str) -> None:
     try:
         _with_retry(_via_465, max_attempts=2, label="SMTP:465")
         return
-    except Exception:
-        pass
+    except Exception as e:
+        # Don't swallow silently — an auth failure looks identical to a
+        # network blip unless the 465 error is visible somewhere.
+        print(f"SMTP:465 failed ({e}), falling back to 587", flush=True)
 
     _with_retry(_via_587, max_attempts=2, label="SMTP:587")
 
@@ -180,12 +199,16 @@ def already_sent_today(subject_contains: str) -> bool:
     truth (SMTP itself has no idempotency) — see mcp-integration plan
     architecture decision 4."""
     today_imap = datetime.now().strftime("%d-%b-%Y")
+    # imaplib encodes SEARCH criteria as ASCII — the subject's emoji would
+    # raise UnicodeEncodeError on every call (and every retry), turning the
+    # dedup check into a guaranteed send failure. Match on the ASCII part.
+    ascii_subject = subject_contains.encode("ascii", "ignore").decode().strip()
 
     def _check():
         with imaplib.IMAP4_SSL("imap.gmail.com", timeout=30) as imap:
             imap.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
             imap.select("INBOX", readonly=True)
-            typ, data = imap.search(None, f'(SINCE "{today_imap}" SUBJECT "{subject_contains}")')
+            typ, data = imap.search(None, f'(SINCE "{today_imap}" SUBJECT "{ascii_subject}")')
             ids = data[0].split() if data and data[0] else []
             return len(ids) > 0
 

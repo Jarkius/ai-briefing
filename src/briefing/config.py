@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,7 +26,14 @@ def _load_env():
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, _, value = line.partition("=")
-                    os.environ.setdefault(key.strip(), value.strip())
+                    # Tolerate the two ways people actually write .env files:
+                    # inline comments (VALUE   # note) and quoted values —
+                    # both otherwise corrupt the value silently (e.g. a
+                    # recipient address with a comment glued on).
+                    value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        value = value[1:-1]
+                    os.environ.setdefault(key.strip(), value)
 
 
 _load_env()
@@ -43,7 +51,6 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
 
 REQUIRED_ENV = {
-    "MAXPLUS_API_KEY": MAXPLUS_API_KEY,
     "GMAIL_ADDRESS": GMAIL_ADDRESS,
     "GMAIL_APP_PASSWORD": GMAIL_APP_PASSWORD,
 }
@@ -52,6 +59,10 @@ REQUIRED_ENV = {
 def require_env():
     """Exit with a clear message if required config is missing. Call at CLI entrypoints only."""
     missing = [name for name, val in REQUIRED_ENV.items() if not val]
+    # The generator's provider chain accepts either backend — requiring
+    # specifically MAXPLUS_API_KEY would block a Gemini-only setup.
+    if not (MAXPLUS_API_KEY or GEMINI_API_KEY):
+        missing.append("MAXPLUS_API_KEY or GEMINI_API_KEY")
     if missing:
         sys.exit(f"ERROR — missing config: {', '.join(missing)}. Copy .env.example to .env and fill it in.")
 
