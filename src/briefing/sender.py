@@ -46,7 +46,7 @@ def _inline(text: str) -> str:
         label, url = m.group(1), m.group(2)
         if not url.startswith(("http://", "https://")):
             return label
-        return f'<a href="{url}" style="color:#3b82f6">{label}</a>'
+        return f'<a href="{url}" style="color:#26890D">{label}</a>'
 
     text = re.sub(r'\[([^\]]+)\]\(([^)\s]+)\)', _link, text)
     text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
@@ -54,94 +54,214 @@ def _inline(text: str) -> str:
     return text
 
 
+# Section → (tag label, tag colour, accent colour) — AI Pulse newsletter
+# styling ported from the Windows branch's ai_briefing.py (now legacy/).
+_SECTION_STYLES = {
+    "top 3": ("🔥 Top Stories", "#D04A02", "#D04A02"),
+    "news": ("📰 AI News", "#00A3E0", "#00A3E0"),
+    "governance": ("🏛️ Governance & Policy", "#6B21A8", "#6B21A8"),
+    "mindset": ("🧠 Mindset & Culture", "#0369A1", "#0369A1"),
+    "learning": ("📚 Learning", "#26890D", "#26890D"),
+    "prompt": ("🎯 Prompt Engineering", "#0D9488", "#0D9488"),
+    "security": ("🔒 Security & Privacy", "#B91C1C", "#B91C1C"),
+    "ethics": ("⚖️ Ethics", "#92400E", "#B45309"),
+    "research": ("🔬 Research", "#1D4ED8", "#1D4ED8"),
+    "tools": ("💻 Tools & Resources", "#26890D", "#26890D"),
+    "community": ("💬 Community", "#5B21B6", "#5B21B6"),
+}
+
+_DEFAULT_SECTION = ("📋 Briefing", "#26890D", "#26890D")
+
+
+def _section_style(header_text: str):
+    h = header_text.lower()
+    for key, val in _SECTION_STYLES.items():
+        if key in h:
+            return val
+    return _DEFAULT_SECTION
+
+_CALLOUT_RE = re.compile(
+    r'\*\*(Key takeaway|Why it matters|Action to take|What to consider|Key insight|Key feature)[:\*]',
+    re.I,
+)
+
+
 def markdown_to_html(text: str, date_str: str, title: str = "Daily AI Briefing") -> str:
-    """Convert markdown to newsletter-ready HTML with section cards, callouts,
-    and social-post styling. Pure function: same input always produces the
-    same output, no file/network access."""
-    lines, parts = text.split("\n"), []
+    """Convert briefing markdown to AI Pulse-style newsletter HTML — the
+    Deloitte-branded table layout from the Windows branch's ai_briefing.py
+    (legacy/), kept table-based for Outlook compatibility. Pure function:
+    same input always produces the same output, no file/network access."""
+    lines = text.split("\n")
+    articles = []
     i = 0
+    current_section = _DEFAULT_SECTION
 
     while i < len(lines):
         s = lines[i].strip()
 
+        # Section header → coloured tag + underlined heading
         if s.startswith("## "):
-            parts.append(
-                f'<div style="margin:32px 0 20px;padding:16px;background:#f8fafc;border-left:4px solid #3b82f6;border-radius:8px">'
-                f'<h2 style="color:#1e293b;margin:0;font-size:20px;font-weight:600">{_inline(s[3:])}</h2>'
-                f'</div>'
-            )
+            header_text = s[3:]
+            current_section = _section_style(header_text)
+            tag_label, tag_color, accent = current_section
+            articles.append(f"""
+  <tr><td style="padding:20px 28px 0 28px;">
+    <p style="margin:0 0 4pt 0;font-size:8pt;font-weight:bold;letter-spacing:1pt;
+              text-transform:uppercase;display:inline-block;padding:3px 10px;
+              border-radius:2px;color:white;background:{tag_color};">&#9632; {tag_label}</p>
+    <h2 style="margin:6pt 0 0 0;font-size:13pt;font-weight:bold;color:{accent};
+               text-transform:uppercase;letter-spacing:.3pt;border-bottom:2px solid {accent};
+               padding-bottom:6pt;">{_inline(header_text)}</h2>
+  </td></tr>""")
+
+        # Story card (bold headline)
         elif s.startswith("**") and "**" in s[2:]:
             end_idx = s.index("**", 2)
             headline = s[2:end_idx]
             rest = s[end_idx + 2:].strip()
-
-            card = f'<div style="margin:24px 0;padding:20px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">'
-            card += f'<h3 style="margin:0 0 12px;color:#0f172a;font-size:18px;font-weight:600;line-height:1.4">{_inline(headline)}</h3>'
+            _, _, accent = current_section
 
             body_lines = [rest] if rest else []
             i += 1
             while i < len(lines):
-                next_line = lines[i].strip()
-                # A card's body ends at the next card/section boundary: a blank
-                # line, a section header, a divider, or a new **headline** —
-                # but **Key/**Why callouts and 📱 social posts belong to THIS
-                # card and are handled by the body loop below.
-                if next_line == "" or next_line.startswith(("## ", "---")):
+                nl = lines[i].strip()
+                # Card ends at the next section/divider/headline; **Key…/**Why…
+                # callouts stay in this card (handled below). A blank line only
+                # ends the card when the next line starts a new headline.
+                if nl.startswith(("## ", "---")):
                     break
-                if next_line.startswith("**") and not next_line.startswith(("**Key", "**Why")):
+                if nl.startswith("**") and not _CALLOUT_RE.match(nl):
                     break
-                body_lines.append(next_line)
+                if nl == "" and i + 1 < len(lines) and lines[i + 1].strip().startswith("**") \
+                        and not _CALLOUT_RE.match(lines[i + 1].strip()):
+                    break
+                body_lines.append(nl)
                 i += 1
             i -= 1
 
-            for body_line in body_lines:
-                if body_line.startswith("**Key"):
-                    card += f'<div style="margin:12px 0 8px;padding:10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px"><strong style="color:#92400e">💡 {_inline(body_line[2:])}</strong></div>'
-                elif body_line.startswith("**Why"):
-                    card += f'<div style="margin:12px 0 8px;padding:10px;background:#dbeafe;border-left:3px solid #3b82f6;border-radius:4px"><strong style="color:#1e40af">🎯 {_inline(body_line[2:])}</strong></div>'
-                elif body_line.startswith("📱"):
-                    social = body_line.replace("📱 Social post:", "").replace("📱", "").strip()
-                    card += f'<div style="margin:16px 0 8px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px">'
-                    card += f'<div style="color:#15803d;font-size:13px;font-weight:600;margin-bottom:6px">📱 READY TO SHARE</div>'
-                    card += f'<div style="color:#166534;font-size:14px;line-height:1.5">{_inline(social)}</div>'
-                    card += '</div>'
-                elif body_line.startswith("[Source]") or body_line.startswith("Source:"):
-                    card += f'<div style="margin:12px 0 0;padding-top:12px;border-top:1px solid #e2e8f0"><span style="font-size:12px;color:#64748b">🔗 {_inline(body_line)}</span></div>'
-                elif "#" in body_line and body_line.startswith("#"):
-                    card += f'<div style="margin:8px 0 0"><span style="font-size:13px;color:#3b82f6">{_inline(body_line)}</span></div>'
+            body_html = ""
+            for bl in body_lines:
+                if not bl:
+                    continue
+                # Key takeaway / Why it matters → accent-border callout
+                if _CALLOUT_RE.match(bl):
+                    label = re.sub(r'\*\*([^*]+)\*\*.*', r'\1', bl).rstrip(':')
+                    rest_bl = re.sub(r'\*\*[^*]+\*\*:?\s*', '', bl).strip()
+                    body_html += f"""
+        <table border=0 cellspacing=0 cellpadding=0 width="100%" style="border-collapse:collapse;margin:10pt 0 0 0;">
+          <tr><td style="background:#f5f9f0;padding:10px 14px;border-left:3px solid {accent};">
+            <p style="margin:0;font-size:10pt;color:{accent};font-weight:bold;">{_inline(label)}:</p>
+            <p style="margin:4pt 0 0 0;font-size:10pt;color:#1a1a1a;">{_inline(rest_bl)}</p>
+          </td></tr>
+        </table>"""
+                # Social post → subtle grey box
+                elif bl.startswith("📱"):
+                    social = re.sub(r'^📱\s*(Social post:?)?\s*', '', bl).strip()
+                    body_html += f"""
+        <table border=0 cellspacing=0 cellpadding=0 width="100%" style="border-collapse:collapse;margin:10pt 0 0 0;">
+          <tr><td style="background:#f8f8f8;padding:8px 12px;border-left:3px solid #ccc;">
+            <p style="margin:0;font-size:8pt;font-weight:bold;color:#888;letter-spacing:.5pt;">📱 SHARE-READY POST</p>
+            <p style="margin:4pt 0 0 0;font-size:10pt;color:#444;">{_inline(social)}</p>
+          </td></tr>
+        </table>"""
+                # Source link
+                elif bl.startswith(("[Source", "Source:")):
+                    body_html += f'<p style="margin:8pt 0 0 0;font-size:9pt;color:#888;">🔗 {_inline(bl)}</p>'
                 else:
-                    card += f'<p style="margin:8px 0;color:#334155;line-height:1.7">{_inline(body_line)}</p>'
+                    body_html += f'<p style="margin:0 0 6pt 0;font-size:11pt;color:#1a1a1a;line-height:1.6;">{_inline(bl)}</p>'
 
-            card += '</div>'
-            parts.append(card)
+            articles.append(f"""
+  <tr><td style="padding:16px 28px 8px 28px;">
+    <h3 style="margin:0 0 8pt 0;font-size:12pt;font-weight:bold;color:#0f172a;line-height:1.4;">{_inline(headline)}</h3>
+    {body_html}
+  </td></tr>
+  <tr><td style="padding:4px 28px;"><div style="border-top:1px solid #eee;"></div></td></tr>""")
+
+        # Section divider (---) → green rule
         elif s == "---":
-            parts.append('<hr style="border:none;border-top:2px solid #e2e8f0;margin:32px 0">')
+            articles.append("""
+  <tr><td style="padding:12px 28px;">
+    <div style="border-top:2px solid #86BC25;"></div>
+  </td></tr>""")
+
+        # Regular paragraph (intro note, etc.)
         elif s and not s.startswith(("##", "**", "📱", "#")):
-            parts.append(f'<p style="margin:12px 0;color:#475569;line-height:1.7">{_inline(s)}</p>')
+            articles.append(f"""
+  <tr><td style="padding:4px 28px;">
+    <p style="margin:0 0 6pt 0;font-size:11pt;color:#555;font-style:italic;line-height:1.6;">{_inline(s)}</p>
+  </td></tr>""")
 
         i += 1
 
-    body = "\n".join(parts)
+    body_rows = "\n".join(articles)
+
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
-             max-width:680px;margin:0 auto;padding:20px;background:#f8fafc">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style>
+body {{margin:0;padding:0;background:#F2F2F2;font-family:"Aptos",Calibri,sans-serif;}}
+p {{margin:0 0 8pt 0;font-size:11pt;color:#1a1a1a;line-height:1.6;}}
+h2 {{margin:14pt 0 6pt 0;font-size:12pt;font-weight:bold;color:#26890D;text-transform:uppercase;letter-spacing:.3pt;}}
+a {{color:#26890D;}}
+</style>
+</head>
+<body bgcolor="#F2F2F2">
+<table border=0 cellspacing=0 cellpadding=0 width=600 align=center style="background:#F2F2F2;border-collapse:collapse;">
 
-  <div style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:28px 32px;border-radius:16px;margin-bottom:32px;box-shadow:0 4px 6px rgba(0,0,0,0.1)">
-    <h1 style="color:#fff;margin:0;font-size:26px;font-weight:700;letter-spacing:-0.5px">🤖 {title}</h1>
-    <p style="color:#cbd5e1;margin:8px 0 0;font-size:14px">{date_str}</p>
-  </div>
+  <!-- BREADCRUMB -->
+  <tr>
+    <td style="padding:6px 20px 4px 20px;background:#F2F2F2;">
+      <p style="margin:0;font-size:7pt;color:#7F7F7F;line-height:1.5;">Southeast Asia &nbsp;|&nbsp; Information Technology &nbsp;|&nbsp; {date_str}</p>
+    </td>
+  </tr>
 
-  <div style="background:#ffffff;padding:32px;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
-    {body}
-  </div>
+  <!-- MASTHEAD -->
+  <tr>
+    <td style="padding:0 5px 5px 5px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="background:#0f172a;border-collapse:collapse;">
+        <tr>
+          <td style="padding:22px 28px 24px 28px;">
+            <p style="margin:0 0 4pt 0;font-size:20pt;font-weight:bold;color:white;letter-spacing:-0.5pt;">🤖 {title}</p>
+            <p style="margin:0 0 6pt 0;font-size:11pt;color:#94a3b8;font-style:italic;">What happened in AI today — curated for SEA IT</p>
+            <p style="margin:0;font-size:8pt;color:#475569;border-top:1px solid #334155;padding-top:8pt;">{date_str} &nbsp;&#8226;&nbsp; Sources: Feeds · YouTube · Web Search</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
 
-  <div style="margin-top:32px;padding:20px;text-align:center;color:#94a3af;font-size:13px;background:#ffffff;border-radius:12px">
-    <p style="margin:0 0 8px"><strong>Sources:</strong> Feeds · YouTube · Web Search · Gemini AI</p>
-    <p style="margin:0">Curated by AI · Delivered with ❤️</p>
-  </div>
+  <!-- BODY -->
+  <tr>
+    <td style="padding:0 5px 5px 5px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="background:white;border-collapse:collapse;">
+        <tr><td style="border-top:3px solid #86BC25;padding:0;"></td></tr>
+        {body_rows}
+        <tr><td style="padding:16px 28px 24px 28px;">
+          <p style="margin:0;font-size:9pt;color:#94a3b8;">This briefing is AI-generated from public sources. Verify before acting on any item.</p>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
 
-</body></html>"""
+  <!-- FOOTER -->
+  <tr>
+    <td style="padding:16px 20px 20px 20px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="border-collapse:collapse;">
+        <tr>
+          <td style="padding:16px 20px;background:#1a1a1a;text-align:center;">
+            <p style="margin:0 0 4pt 0;font-size:9pt;color:#86BC25;font-weight:bold;letter-spacing:.5pt;text-transform:uppercase;">SEA IT · AI Hub</p>
+            <p style="margin:0 0 4pt 0;font-size:8pt;color:#aaa;">This communication is intended solely for Deloitte SEA IT personnel.</p>
+            <p style="margin:0;font-size:8pt;color:#666;">Confidential — For Internal Use Only &nbsp;&#8226;&nbsp; &copy; Deloitte {date_str[-4:]}</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</body>
+</html>"""
 
 
 def split_two_parts(markdown_text: str) -> tuple[str, str]:
