@@ -404,17 +404,27 @@ def call_gemini(items: list[dict], date: str, style: str, research_findings: str
     if research_findings:
         research_block = f"\n\n=== REQUESTED RESEARCH ===\n{_sanitize(research_findings)}\n"
 
-    parts = []
-    for i, (label, instructions) in enumerate(SECTION_PROMPTS):
+    def _one_section(i: int) -> str:
+        label, instructions = SECTION_PROMPTS[i]
         slice_items = items[i::len(SECTION_PROMPTS)][:MAX_ITEMS_PER_SECTION_CALL]
         context = _sanitize(build_context(slice_items))
         ctx = f"Today is {date}.{research_block}\n\nRAW DATA:\n{context}"
 
         log(f"Calling Gemini ({label}, {len(slice_items)} items)…")
-        parts.append(_grok_call(
+        return _grok_call(
             SYSTEM_PROMPT,
             f"{ctx}\n\n{instructions}\n\n{BASE_RULES}{style_block}",
-        ))
+        )
+
+    # The 6 section calls are independent — run them concurrently instead of
+    # paying ~30s each in sequence. max_workers=3 (not 6) stays under the
+    # Gemini free tier's requests-per-minute ceiling; a 429 still retries
+    # with backoff inside _call_with_retry if we do hit it. Results keep
+    # SECTION_PROMPTS order regardless of completion order.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        parts = list(pool.map(_one_section, range(len(SECTION_PROMPTS))))
     return "\n\n---\n\n".join(parts)
 
 
