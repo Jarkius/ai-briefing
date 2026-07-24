@@ -17,13 +17,22 @@ Code-complete; acceptance bar not fully met.
 - [x] End-to-end runs: 3 archives on 2026-07-23 (`archives/briefing_2026-07-23_*.md`)
 
 ### Pending
-- [ ] **Reload launchd plist** — `briefing.log` 2026-07-23 06:53 shows the *legacy* pipeline still ran at schedule (DNS failures, old collectors). `launchctl unload/load` the plist, then verify via `launchctl start com.user.ai-briefing` + log inspection (plan step 13 acceptance)
-- [ ] Tests: create `tests/` (request parsing, prompt assembly, fixture DB) — verification step 1
+- [ ] **⚠️ BLOCKER for 5am email: AI provider credit/key — USER ACTION REQUIRED.** Confirmed live at the 2026-07-24 05:28 scheduled run: pipeline ran perfectly (39 items collected, launchd trigger worked) but Generate failed with maxplus HTTP 402 insufficient_credit (~$0.25 needed per call) and no `GEMINI_API_KEY` in `.env` for the fallback. Fix either: top up maxplus credit at maxplus-ai.cc, OR get a free key at https://aistudio.google.com/app/apikey and add `GEMINI_API_KEY=<key>` to `.env`. Nothing in code can fix this.
 - [ ] AC5: offline soft-fail run (Wi-Fi off mid-collect → still exits 0, sends from DB)
-- [ ] AC7: STYLE-MARKER-42 style-rule assert via `--dry-run`
-- [ ] AC8: wall-clock measurement (<5 min no-video, <15 min with one transcription)
-- [ ] Commit the staged implementation (large batch currently staged, uncommitted)
+- [ ] AC7: run `scripts/check_style_marker.sh` (harness written, unexecuted — blocked on provider 402)
+- [ ] AC8: wall-clock measurement (<5 min no-video, <15 min with one transcription) — blocked on provider 402
+- [ ] QA gate report → PR `feat/mcp-collector` → `main`
 - [ ] Follow-up: repoint `setup.sh` fork SHA → upstream tag when PR #8 merges (check monthly)
+
+### Done 2026-07-23 late session (team run)
+- [x] launchd reloaded; `launchctl start` runs the NEW pipeline (log 23:10/23:12/23:22: Collect→Research→Generate phases) — legacy path gone
+- [x] Schedule moved 06:00 → **05:00** per user request; plist reinstalled + reloaded (verified via `plutil`)
+- [x] Implementation committed + pushed on `feat/mcp-collector` (`4bd6aca`), merged `origin/main` Windows work (`68edb81`)
+- [x] `tests/` — 54 tests green in <1s, no network (`22d63a9`, extended in `a35aa74`)
+- [x] Windows wrapper now targets `run.py`; AC7 harness written (`f2ce5ac`)
+- [x] Fixed: bare-URL source links stripped by sanitizer → `[title](url)` (`c6e1d1c`); SMTP retry + 465/587 fallback (`c6e1d1c`)
+- [x] Fixed: `src/briefing/config.py` was never tracked (bare `config.py` gitignore rule) — fresh clones were broken; rule scoped to root, module committed (`a35aa74`)
+- [x] Gemini-direct fallback + fail-fast on 4xx in generator (`a35aa74`)
 
 ## Control panel (`.omc/plans/2026-07-22-control-panel.md`)
 
@@ -41,6 +50,11 @@ Not started beyond scaffolding — `src/panel/` has only empty `__init__.py`, `s
 - [ ] Out-of-scope tracked elsewhere: 6am launchd DNS/proxy issue (`FIX_EMAIL_DELIVERY.md`)
 
 ## Work log (newest first — append a timestamped entry per session)
+
+### 2026-07-24 ~09:00 (continuation of team session)
+- **5am run verified end-to-end via launchd**: schedule fired, NEW pipeline ran (39 items collected), only Generate failed — HTTP 402 maxplus credit. Email absent for that reason alone.
+- QA gate: two independent reviews returned. Fixed all actionable findings (`876e288`): email HTML escaping + link-scheme allowlist, dead card-body loop that dropped every social post, IMAP emoji UnicodeEncodeError that would fail every send, Windows fcntl import crash, Gemini key to header, .env parser quotes/comments, either-provider require_env, minimal MCP subprocess env, harness backup verification, prompt-injection hardening.
+- 54 tests green after all fixes; functional render checks pass (social posts render, XSS escaped, ascii IMAP marker).
 
 ### 2026-07-23 22:42
 - Audited MCP integration plan vs. actual code: all 5 phases implemented (collector, generator+db guards, researcher, run.py orchestrator, setup.sh with pinned fork). Evidence: 3 archives today, checked-off research request, IMAP pre-check in sender.py.
