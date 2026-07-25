@@ -92,6 +92,10 @@ def require_env():
     # specifically MAXPLUS_API_KEY would block a Gemini-only setup.
     if not (MAXPLUS_API_KEY or GEMINI_API_KEY):
         missing.append("MAXPLUS_API_KEY or GEMINI_API_KEY")
+    # A blank/comma-only RECIPIENT_EMAIL parses to [] and would only surface
+    # at send time, after a full collect/generate cycle.
+    if not RECIPIENT_EMAILS:
+        missing.append("RECIPIENT_EMAIL")
     if missing:
         sys.exit(f"ERROR — missing config: {', '.join(missing)}. Copy .env.example to .env and fill it in.")
 

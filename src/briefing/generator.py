@@ -482,8 +482,11 @@ def generate(conn, research_findings: str = "") -> dict:
     Returns {'markdown': str, 'part1_html': str, 'part2_html': str,
     'date_str': str, 'today': str}. Callers (CLI and dashboard) decide what
     to do with the result (archive + send, or just render for preview)."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    date_str = datetime.now().strftime("%A, %B %-d, %Y")
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    # Built without %-d / %#d so it works on both Windows and Unix (%-d is a
+    # glibc/BSD extension; Windows CPython raises ValueError on it).
+    date_str = f"{now.strftime('%A, %B')} {now.day}, {now.year}"
 
     items = fetch_recent_items(conn)
     research_budget_used = len(research_findings)

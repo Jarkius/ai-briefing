@@ -337,3 +337,23 @@ def test_full_chain_falls_through_to_claude_cli():
         result = _grok_call("sys", "user", max_attempts=2)
 
     assert result == "claude reply"
+
+
+# ---- date_str formatting (Windows compatibility) ----------------------------
+
+
+def test_date_str_avoids_platform_specific_strftime():
+    # %-d is a glibc/BSD extension — Windows CPython raises ValueError on it,
+    # which soft-failed the whole Generate phase on the Windows machine (no
+    # email, silently, every day). Regression guard: the generate() source
+    # must not use %-d or %#d anywhere.
+    import inspect
+    import re
+
+    from briefing import generator
+
+    src = inspect.getsource(generator)
+    # Only flag %-d/%#d inside strftime(...) calls — the explanatory comment
+    # in generate() legitimately names the forbidden directives.
+    offenders = re.findall(r"strftime\([^)]*%[-#]d", src)
+    assert offenders == []

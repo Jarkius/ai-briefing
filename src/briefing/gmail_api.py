@@ -75,6 +75,10 @@ def already_sent_today_via_api(subject_contains: str) -> bool:
     (subject substring match, today's messages), different transport."""
     from datetime import datetime
 
+    # Gmail interprets after: in the ACCOUNT's timezone while this uses the
+    # machine's local date — near midnight, with mismatched timezones, the
+    # two can disagree (as can the IMAP fallback's SINCE window). Accepted:
+    # the scheduled run is ~5am local, nowhere near either boundary.
     today = datetime.now().strftime("%Y/%m/%d")
     query = f'subject:"{subject_contains}" after:{today}'
     result = _service().users().messages().list(userId="me", q=query, maxResults=1).execute()
