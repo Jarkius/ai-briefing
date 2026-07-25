@@ -365,6 +365,73 @@ async def settings_save(request: Request):
     return HTMLResponse(_banner("ok", "settings saved — applied to this server immediately (.env stays gitignored)"))
 
 
+# ---- logs ----------------------------------------------------------------------
+
+PHASES = ["collect_status", "research_status", "generate_status", "send_status"]
+
+
+def _phase_strip() -> list[dict]:
+    """Latest status per phase across all runs rows (insert-only design:
+    a dashboard-only send must not mask a cron collect, so each phase is
+    read independently)."""
+    strip = []
+    try:
+        conn = db.connect()
+        try:
+            for col in PHASES:
+                row = db.latest_phase_status(conn, col)
+                strip.append({
+                    "phase": col.removesuffix("_status"),
+                    "status": row[col] if row else "—",
+                    "when": (row["started_at"][:16].replace("T", " ") if row else ""),
+                    "source": row["source"] if row else "",
+                })
+        finally:
+            conn.close()
+    except Exception:
+        strip = [{"phase": c.removesuffix("_status"), "status": "—", "when": "", "source": ""}
+                 for c in PHASES]
+    return strip
+
+
+@app.get("/logs", response_class=HTMLResponse)
+async def logs_page(request: Request):
+    return templates.TemplateResponse(request, "logs.html", {"active": "logs"})
+
+
+@app.get("/logs/tail", response_class=HTMLResponse)
+async def logs_tail():
+    """Cron pane: briefing.log is written by launchd's stdout redirect —
+    dashboard jobs never appear here (they report via the jobs pane below).
+    """
+    tail = ""
+    if os.path.exists(config.LOG_PATH):
+        with open(config.LOG_PATH, errors="replace") as f:
+            tail = "".join(f.readlines()[-200:])
+    jobs_rows = "".join(
+        f'<tr><td>{j.started_at}</td><td>{html_lib.escape(j.name)}</td>'
+        f'<td class="job-{j.status}">{j.status}</td>'
+        f'<td>{html_lib.escape(j.phase_text[:120])}</td></tr>'
+        for j in list(jobs.JOBS.values())[-20:]
+    ) or '<tr><td colspan="4" class="muted">no dashboard jobs this session</td></tr>'
+    strip = "".join(
+        f'<span class="phase phase-{s["status"] if s["status"] in ("ok", "error", "soft_fail") else "none"}">'
+        f'{s["phase"]}: {s["status"]}'
+        f'{" · " + s["when"] + " (" + s["source"] + ")" if s["when"] else ""}</span>'
+        for s in _phase_strip()
+    )
+    return HTMLResponse(
+        f'<div id="logs-live" hx-get="/logs/tail" hx-trigger="every 3s" hx-swap="outerHTML">'
+        f'<div class="phase-strip">{strip}</div>'
+        f'<h2 class="muted">Dashboard jobs (this session)</h2>'
+        f'<table class="sources-table"><thead><tr><th>started</th><th>job</th><th>status</th><th>phase</th></tr></thead>'
+        f'<tbody>{jobs_rows}</tbody></table>'
+        f'<h2 class="muted">briefing.log (cron) — last 200 lines</h2>'
+        f'<pre class="logtail">{html_lib.escape(tail) or "(no log file yet)"}</pre>'
+        f'</div>'
+    )
+
+
 @app.get("/status", response_class=HTMLResponse)
 async def status():
     """Header status dot, polled by htmx every 3s.

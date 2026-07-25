@@ -82,6 +82,19 @@ textarea, input[type="text"], input[type="password"], input[type="time"], select
 .settings-form label { display: block; margin: 0.7rem 0; font-size: 0.85rem; color: var(--muted); }
 .settings-form input { margin-top: 0.25rem; }
 
+.phase-strip { display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 0.6rem 0 1rem; }
+.phase { font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem;
+  padding: 0.3rem 0.7rem; border-radius: 3px; border: 1px solid #3a3944; color: var(--muted); }
+.phase-ok { color: var(--ok); border-color: var(--ok); }
+.phase-error { color: var(--err); border-color: var(--err); }
+.phase-soft_fail { color: var(--accent); border-color: var(--accent); }
+.logtail { background: #111015; border: 1px solid #26252c; border-radius: 4px;
+  padding: 0.9rem; font-family: ui-monospace, Menlo, monospace; font-size: 0.75rem;
+  line-height: 1.5; max-height: 480px; overflow-y: auto; white-space: pre-wrap; }
+.job-running { color: var(--accent); }
+.job-done { color: var(--ok); }
+.job-error { color: var(--err); }
+
 .requests { list-style: none; padding: 0; }
 .requests li { padding: 0.35rem 0; border-bottom: 1px solid #26252c; font-size: 0.92rem; }
 .requests li.done { color: var(--muted); }
