@@ -12,3 +12,5 @@ dashboard's live research) and folds findings into the newsletter as a
 - [x] https://www.youtube.com/watch?v=bcM9dP_uXJU (researched 2026-07-25)
 
 - [x] https://www.youtube.com/watch?v=7xTGNNLPyMI (researched 2026-07-25)
+
+- [x] https://www.youtube.com/watch?v=7AG8gsWPs5E (researched 2026-07-26)
