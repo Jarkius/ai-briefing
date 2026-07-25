@@ -22,7 +22,7 @@ Code-complete; acceptance bar not fully met.
 - [x] AC5 **PASSED 2026-07-25 20:26**: Wi-Fi killed 8s into Collect (`networksetup -setairportpower en0 off`, 25s outage) — all 26 sources logged per-source DNS soft-fails (no traceback), pipeline continued, generated from 48 DB items, Send returned `{'part1': 'already_sent', 'part2': 'already_sent'}` (correct dedup — 4 sends already that day), **exit 0**. Wi-Fi restored via trap.
 - [x] AC7 **PASSED 2026-07-25 20:25**: `scripts/check_style_marker.sh` exit 0 — STYLE-MARKER-42 in `archives/briefing_2026-07-25_2025.md`, newsletter_style.md restored byte-identical. (Harness itself had a bug: "Archived to" log line now lists 3 comma-separated paths; sed fixed to take the first.)
 - [x] AC8 **MET (no-video bound)**: two full scheduled launchd runs measured via briefing.log phase timestamps — 19:05:06→19:06:19 (73s) and 20:13:02→20:14:03 (61s), both ≪ 5-min bar. With-one-transcription bound (<15 min) untested — no new YouTube video available on test days; bound remains theoretical.
-- [ ] QA gate report → PR `feat/mcp-collector` → `main`
+- [x] QA gate #2 done 2026-07-25 (findings fixed in `a03c8b3`: Windows %-d strftime crash, empty-recipient guard); **PR #2 open with full acceptance evidence** → https://github.com/Jarkius/ai-briefing/pull/2 — awaiting user review/merge
 - [ ] Follow-up: repoint `setup.sh` fork SHA → upstream tag when PR #8 merges (check monthly)
 
 ### Done 2026-07-23 late session (team run)
