@@ -17,7 +17,7 @@ Code-complete; acceptance bar not fully met.
 - [x] End-to-end runs: 3 archives on 2026-07-23 (`archives/briefing_2026-07-23_*.md`)
 
 ### Pending
-- [ ] **⚠️ Remaining risk for 5am email: Gmail SMTP/IMAP TLS-blocked on this network** (2026-07-24 daytime: TCP connects, TLS handshake reset 6/6 on :465/:993/:587; HTTPS :443 to Google works fine). Historical sends succeeded, so the block may not apply at 5am. If tomorrow's email doesn't arrive with "Connection reset by peer" in briefing.log → implement Gmail-API-over-443 send fallback (needs OAuth setup).
+- [x] ~~Remaining risk for 5am email: Gmail SMTP/IMAP TLS-blocked on this network~~ **RESOLVED 2026-07-25**: Gmail API over 443 is now the PRIMARY send+pre-check transport (SMTP/IMAP demoted to fallback). OAuth done on this Mac as sender `jarkius.ai@gmail.com`; real sends verified through the API path. Note: Windows machine still needs its own OAuth token (data/ is per-machine) — until then it uses SMTP→Outlook COM as before.
 - [ ] Gemini free-tier key (in .env) hit 429 daily/rate quota during 2026-07-24 testing — quota resets midnight PT (=2pm Bangkok); 5am run should have fresh quota. maxplus commented out in .env (pool no longer serves gemini models; would need MAXPLUS_MODEL=gpt-5.5 + credit top-up to re-enable).
 - [ ] AC5: offline soft-fail run (Wi-Fi off mid-collect → still exits 0, sends from DB)
 - [ ] AC7: run `scripts/check_style_marker.sh` (harness written, unexecuted — blocked on provider 402)
@@ -51,6 +51,20 @@ Not started beyond scaffolding — `src/panel/` has only empty `__init__.py`, `s
 - [ ] Out-of-scope tracked elsewhere: 6am launchd DNS/proxy issue (`FIX_EMAIL_DELIVERY.md`)
 
 ## Work log (newest first — append a timestamped entry per session)
+
+### 2026-07-25 ~20:00 (Gmail API primary + sender switch)
+- **Sender identity switched to `jarkius.ai@gmail.com`** (`.env` GMAIL_ADDRESS; recipient stays juckrit@gmail.com; backup `.env.bak-2026-07-25`). Keeps OAuth token + app password off the personal account.
+- **One-time OAuth done on this Mac** (user consent in browser): `data/gmail_oauth_client_secret.json` + `data/gmail_oauth_token.json` (both gitignored, per-machine). First 403 was the test-user gate — fixed by adding jarkius.ai as test user.
+- **Gmail API (443) promoted to PRIMARY** in `sender.py`: `send_email` tries API→SMTP:465→SMTP:587→(win32) Outlook; `already_sent_today` tries API→IMAP, still fail-closed. Rationale: office network resets TLS on 465/587/993 but 443 always works — the API is the only transport that works everywhere.
+- `require_env` no longer hard-requires GMAIL_APP_PASSWORD when the OAuth token exists (SMTP became the fallback).
+- **Verified in anger**: real API-path send delivered (twice — direct `send_email_via_api` + full `send_email` ordering); real `already_sent_today` pre-check over API returns correctly. 78 tests green (was 54; sender tests rewritten for API-first, gmail_api tests added earlier).
+- ⚠️ GMAIL_APP_PASSWORD in .env still belongs to juckrit@gmail.com — SMTP fallback auth will fail until a new app password for jarkius.ai is generated (optional; API is primary).
+
+### 2026-07-25 19:05 (scheduled-run test)
+- **Full scheduled run verified via launchd, email DELIVERED**: temporarily set StartCalendarInterval to 19:05, run fired on time — Collect (2 new items / 26 sources), Generate (6/6 Gemini calls, no quota errors), Send `{'part1': 'sent', 'part2': 'sent'}` in ~12s. Whole run 19:05:06→19:06:19 (~73s).
+- Send succeeded without needing the Gmail API fallback this time (no SMTP-fallback lines in log) — fallback remains unverified-in-anger on the office network.
+- Schedule restored to 05:00 and plist reloaded (verified via `plutil` + `launchctl list`).
+- Note: this morning's 07:06 run had Generate fail with "Remote end closed connection without response"; tonight's run succeeded, so it was transient.
 
 ### 2026-07-24 ~09:00 (continuation of team session)
 - **5am run verified end-to-end via launchd**: schedule fired, NEW pipeline ran (39 items collected), only Generate failed — HTTP 402 maxplus credit. Email absent for that reason alone.

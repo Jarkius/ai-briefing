@@ -322,26 +322,39 @@ $mail.Send()
 
 
 def send_email(subject: str, html: str) -> None:
-    """Send one HTML email via Gmail SMTP. Raises on failure — callers decide
-    whether that's fatal (CLI) or a banner (dashboard).
+    """Send one HTML email. Raises on failure — callers decide whether
+    that's fatal (CLI) or a banner (dashboard).
 
-    Tries SMTP_SSL:465 first, falls back to STARTTLS:587. Observed on this
-    network: TLS handshakes to smtp.gmail.com are intermittently reset —
-    465 succeeded when 587 failed in back-to-back tests, and this pattern
-    reproduced with raw sockets (no smtplib involved), so it's network-level
-    flakiness, not an smtplib/library bug. Trying both gives each send the
-    best chance of getting through a transient block on one path.
+    Once the one-time OAuth setup is done (scripts/setup_gmail_oauth.py),
+    the Gmail API over HTTPS/443 is the PRIMARY path: the office network
+    resets TLS handshakes on 465/587/993 but always allows 443 (confirmed
+    2026-07-24 via raw-socket A/B tests; API send verified in anger
+    2026-07-25), so the API is the only transport that works on every
+    network this machine uses. SMTP is the fallback if the API call fails,
+    and the primary only while the API is unconfigured.
+
+    SMTP tries SMTP_SSL:465 first, then STARTTLS:587 — TLS handshakes to
+    smtp.gmail.com reset intermittently and 465/587 have failed
+    independently of each other in back-to-back tests, so trying both gives
+    the best chance through a transient block on one path.
 
     On win32, if both SMTP attempts fail, falls back to a local Outlook COM
-    send (see _send_via_outlook) — the office network this laptop runs on
-    is 443-only and blocks SMTP entirely, so Outlook's own connection is the
-    only path out.
+    send (see _send_via_outlook) — Outlook's own connection is then the
+    only remaining path out."""
+    from . import gmail_api
 
-    On any platform, if SMTP fails AND the Gmail API is configured (see
-    gmail_api.py / scripts/setup_gmail_oauth.py), falls back to sending
-    over HTTPS via the Gmail API — the same 443-only-network problem can
-    hit macOS too (confirmed independently by raw-socket testing), and
-    macOS has no Outlook COM to fall back to."""
+    if gmail_api.is_configured():
+        try:
+            _with_retry(
+                lambda: gmail_api.send_email_via_api(subject, html),
+                max_attempts=2,
+                label="Gmail API",
+            )
+            print("sent via Gmail API (HTTPS/443)", flush=True)
+            return
+        except Exception as e:
+            print(f"Gmail API send failed ({e}), falling back to SMTP", flush=True)
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"AI Briefing <{config.GMAIL_ADDRESS}>"
@@ -399,32 +412,39 @@ def send_email(subject: str, html: str) -> None:
         smtp_error = e
         if sys.platform == "win32":
             print(f"SMTP:587 failed ({e}), falling back to Outlook COM", flush=True)
-        else:
-            print(f"SMTP:587 failed ({e}), falling back to Gmail API (if configured)", flush=True)
 
     if sys.platform == "win32":
         _send_via_outlook(subject, html)
         print("sent via Outlook COM fallback", flush=True)
         return
 
-    from . import gmail_api
-
-    if not gmail_api.is_configured():
-        # Preserve the original SMTP exception type/traceback — callers
-        # (and tests) match on smtplib.SMTPException, not a generic wrapper.
-        # The "how to fix" guidance still reaches the log via the print
-        # above; re-raising here just re-throws what SMTP already raised.
-        raise smtp_error
-
-    gmail_api.send_email_via_api(subject, html)
-    print("sent via Gmail API fallback (HTTPS/443)", flush=True)
+    # Gmail API already ran first (and failed) if configured — don't retry
+    # it here. Preserve the original SMTP exception type/traceback — callers
+    # (and tests) match on smtplib.SMTPException, not a generic wrapper.
+    raise smtp_error
 
 
 def already_sent_today(subject_contains: str) -> bool:
-    """IMAP pre-check: does today's mailbox already contain a message whose
-    subject contains this string? This is the cross-machine dedup source of
-    truth (SMTP itself has no idempotency) — see mcp-integration plan
-    architecture decision 4."""
+    """Mailbox pre-check: does today's mailbox already contain a message
+    whose subject contains this string? This is the cross-machine dedup
+    source of truth (SMTP itself has no idempotency) — see mcp-integration
+    plan architecture decision 4.
+
+    Mirrors send_email's transport order: Gmail API (443) first when
+    configured — IMAP:993 is blocked on the same network that blocks
+    SMTP — with IMAP as the fallback."""
+    from . import gmail_api
+
+    if gmail_api.is_configured():
+        try:
+            return _with_retry(
+                lambda: gmail_api.already_sent_today_via_api(subject_contains),
+                max_attempts=2,
+                label="Gmail API check",
+            )
+        except Exception as e:
+            print(f"Gmail API check failed ({e}), falling back to IMAP", flush=True)
+
     today_imap = datetime.now().strftime("%d-%b-%Y")
     # imaplib encodes SEARCH criteria as ASCII — the subject's emoji would
     # raise UnicodeEncodeError on every call (and every retry), turning the
@@ -439,18 +459,10 @@ def already_sent_today(subject_contains: str) -> bool:
             ids = data[0].split() if data and data[0] else []
             return len(ids) > 0
 
-    try:
-        return _with_retry(_check, max_attempts=3, label="IMAP check")
-    except Exception as e:
-        from . import gmail_api
-
-        if not gmail_api.is_configured():
-            # Fail closed: if we can't verify "already sent", don't send —
-            # a caller catching this exception should treat it as "skip",
-            # not "assume not sent and risk a duplicate".
-            raise
-        print(f"IMAP check failed ({e}), falling back to Gmail API (HTTPS/443)", flush=True)
-        return gmail_api.already_sent_today_via_api(subject_contains)
+    # Fail closed: if neither transport can verify "already sent", don't
+    # send — a caller catching this exception should treat it as "skip",
+    # not "assume not sent and risk a duplicate".
+    return _with_retry(_check, max_attempts=3, label="IMAP check")
 
 
 def send_two_part_briefing(part1_html: str, part2_html: str, date_str: str) -> dict:

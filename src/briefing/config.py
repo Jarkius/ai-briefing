@@ -75,6 +75,15 @@ REQUIRED_ENV = {
 def require_env():
     """Exit with a clear message if required config is missing. Call at CLI entrypoints only."""
     missing = [name for name, val in REQUIRED_ENV.items() if not val]
+    # The app password only feeds the SMTP/IMAP fallback — once the Gmail
+    # API OAuth token exists (the primary transport), a missing password
+    # must not block the run. Local import: gmail_api imports config, so a
+    # top-level import here would be circular.
+    if "GMAIL_APP_PASSWORD" in missing:
+        from . import gmail_api
+
+        if gmail_api.is_configured():
+            missing.remove("GMAIL_APP_PASSWORD")
     # The generator's provider chain accepts either backend — requiring
     # specifically MAXPLUS_API_KEY would block a Gemini-only setup.
     if not (MAXPLUS_API_KEY or GEMINI_API_KEY):

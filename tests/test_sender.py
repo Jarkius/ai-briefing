@@ -83,7 +83,12 @@ def test_with_retry_exhausts_attempts_then_raises():
     assert mock_sleep.call_count == 2  # slept between attempts, not after the last
 
 
-# ---- already_sent_today (IMAP pre-check) ------------------------------------
+# ---- already_sent_today (mailbox pre-check, Gmail API first) ----------------
+#
+# gmail_api.is_configured is ALWAYS patched here: it checks a real file
+# (data/gmail_oauth_token.json) which exists on machines where the one-time
+# OAuth setup was done — without pinning it, these tests would take
+# different paths (or hit the live API) depending on the machine.
 
 
 def _mock_imap(search_return_ids: bytes):
@@ -94,9 +99,13 @@ def _mock_imap(search_return_ids: bytes):
     return imap
 
 
+def _api_unconfigured():
+    return patch("briefing.gmail_api.is_configured", return_value=False)
+
+
 def test_already_sent_today_true_when_message_found():
     imap = _mock_imap(b"101 102")
-    with patch("briefing.sender.imaplib.IMAP4_SSL", return_value=imap):
+    with _api_unconfigured(), patch("briefing.sender.imaplib.IMAP4_SSL", return_value=imap):
         assert already_sent_today("AI Briefing Part 1") is True
     imap.login.assert_called_once()
     imap.select.assert_called_once_with("INBOX", readonly=True)
@@ -104,48 +113,55 @@ def test_already_sent_today_true_when_message_found():
 
 def test_already_sent_today_false_when_no_message_found():
     imap = _mock_imap(b"")
-    with patch("briefing.sender.imaplib.IMAP4_SSL", return_value=imap):
+    with _api_unconfigured(), patch("briefing.sender.imaplib.IMAP4_SSL", return_value=imap):
         assert already_sent_today("AI Briefing Part 1") is False
 
 
 def test_already_sent_today_short_circuits_without_touching_smtp():
     imap = _mock_imap(b"101")
-    with patch("briefing.sender.imaplib.IMAP4_SSL", return_value=imap) as mock_ssl:
+    with _api_unconfigured(), patch("briefing.sender.imaplib.IMAP4_SSL", return_value=imap) as mock_ssl:
         already_sent_today("AI Briefing Part 1")
     mock_ssl.assert_called_once_with("imap.gmail.com", timeout=30)
 
 
 def test_already_sent_today_retries_transient_failure_then_succeeds():
     good_imap = _mock_imap(b"101")
-    with patch(
+    with _api_unconfigured(), patch(
         "briefing.sender.imaplib.IMAP4_SSL",
         side_effect=[ConnectionResetError("reset"), good_imap],
     ), patch("briefing.sender.time.sleep"):
         assert already_sent_today("AI Briefing Part 1") is True
 
 
-def test_already_sent_today_falls_back_to_gmail_api_when_imap_exhausted():
-    with patch(
-        "briefing.sender.imaplib.IMAP4_SSL",
-        side_effect=ConnectionResetError("reset"),
-    ), patch("briefing.gmail_api.is_configured", return_value=True), \
-       patch("briefing.gmail_api.already_sent_today_via_api", return_value=True) as mock_api, \
-       patch("briefing.sender.time.sleep"):
+def test_already_sent_today_uses_gmail_api_first_without_touching_imap():
+    with patch("briefing.gmail_api.is_configured", return_value=True), \
+         patch("briefing.gmail_api.already_sent_today_via_api", return_value=True) as mock_api, \
+         patch("briefing.sender.imaplib.IMAP4_SSL") as mock_imap:
         assert already_sent_today("AI Briefing Part 1") is True
     mock_api.assert_called_once_with("AI Briefing Part 1")
+    mock_imap.assert_not_called()
 
 
-def test_already_sent_today_raises_when_imap_exhausted_and_gmail_api_unconfigured():
+def test_already_sent_today_falls_back_to_imap_when_gmail_api_fails():
+    imap = _mock_imap(b"101")
+    with patch("briefing.gmail_api.is_configured", return_value=True), \
+         patch("briefing.gmail_api.already_sent_today_via_api", side_effect=RuntimeError("api down")), \
+         patch("briefing.sender.imaplib.IMAP4_SSL", return_value=imap), \
+         patch("briefing.sender.time.sleep"):
+        assert already_sent_today("AI Briefing Part 1") is True
+
+
+def test_already_sent_today_raises_when_all_transports_exhausted():
+    # Fail closed: no transport could verify -> raise, never "assume unsent".
     with patch(
         "briefing.sender.imaplib.IMAP4_SSL",
         side_effect=ConnectionResetError("reset"),
-    ), patch("briefing.gmail_api.is_configured", return_value=False), \
-       patch("briefing.sender.time.sleep"):
+    ), _api_unconfigured(), patch("briefing.sender.time.sleep"):
         with pytest.raises(ConnectionResetError):
             already_sent_today("AI Briefing Part 1")
 
 
-# ---- send_email: SMTP -> Outlook COM fallback (win32 only) -----------------
+# ---- send_email: Gmail API primary -> SMTP -> Outlook COM (win32) -----------
 
 
 def _mock_smtp_ssl_failing():
@@ -167,14 +183,25 @@ def test_send_email_does_not_attempt_outlook_on_darwin():
     mock_run.assert_not_called()
 
 
-def test_send_email_falls_back_to_gmail_api_on_darwin_when_configured():
-    with patch("briefing.sender.sys.platform", "darwin"), \
-         _mock_smtp_ssl_failing(), _mock_smtp_failing(), \
-         patch("briefing.gmail_api.is_configured", return_value=True), \
+def test_send_email_uses_gmail_api_first_without_touching_smtp():
+    with patch("briefing.gmail_api.is_configured", return_value=True), \
          patch("briefing.gmail_api.send_email_via_api") as mock_api_send, \
-         patch("briefing.sender.time.sleep"):
+         patch("briefing.sender.smtplib.SMTP_SSL") as mock_smtp:
         send_email("subject", "<p>html</p>")
     mock_api_send.assert_called_once_with("subject", "<p>html</p>")
+    mock_smtp.assert_not_called()
+
+
+def test_send_email_falls_back_to_smtp_when_gmail_api_fails():
+    server = MagicMock()
+    server.__enter__.return_value = server
+    server.__exit__.return_value = False
+    with patch("briefing.gmail_api.is_configured", return_value=True), \
+         patch("briefing.gmail_api.send_email_via_api", side_effect=RuntimeError("api down")), \
+         patch("briefing.sender.smtplib.SMTP_SSL", return_value=server), \
+         patch("briefing.sender.time.sleep"):
+        send_email("subject", "<p>html</p>")
+    server.sendmail.assert_called_once()
 
 
 def _mock_smtp_ssl_sendmail_ok_but_quit_fails():
@@ -193,7 +220,7 @@ def _mock_smtp_ssl_sendmail_ok_but_quit_fails():
 
 def test_send_email_does_not_resend_when_only_smtp_quit_fails():
     ctx, server = _mock_smtp_ssl_sendmail_ok_but_quit_fails()
-    with ctx, patch("briefing.sender.time.sleep"):
+    with ctx, _api_unconfigured(), patch("briefing.sender.time.sleep"):
         send_email("subject", "<p>html</p>")
     server.sendmail.assert_called_once()  # not retried/resent
 
@@ -209,7 +236,7 @@ def test_send_email_raises_original_smtp_error_when_gmail_api_unconfigured():
 
 def test_send_email_falls_back_to_outlook_on_win32_when_smtp_fails():
     with patch("briefing.sender.sys.platform", "win32"), \
-         _mock_smtp_ssl_failing(), _mock_smtp_failing(), \
+         _mock_smtp_ssl_failing(), _mock_smtp_failing(), _api_unconfigured(), \
          patch("briefing.sender.subprocess.run", return_value=MagicMock(returncode=0, stderr="")) as mock_run, \
          patch("briefing.sender.time.sleep"):
         send_email("subject", "<p>html</p>")

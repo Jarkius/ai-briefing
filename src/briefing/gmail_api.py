@@ -1,8 +1,9 @@
-"""Gmail API (HTTPS, port 443) send + inbox-search fallback for networks
-that block the raw SMTP/IMAP protocol ports (465/587/993) — confirmed on
-2026-07-24 to happen on at least one network this Mac uses ("office
-network is 443-only", TODO.md). SMTP/IMAP remain the primary path since
-they work today and need no setup; this module is used only when they fail.
+"""Gmail API (HTTPS, port 443) send + inbox-search. PRIMARY transport once
+configured: the office network blocks the raw SMTP/IMAP protocol ports
+(465/587/993, TLS handshakes reset — confirmed 2026-07-24, "office network
+is 443-only", TODO.md) but 443 always works. sender.py tries this first
+and falls back to SMTP/IMAP only if an API call fails; until the one-time
+OAuth setup is done, SMTP/IMAP are the only path.
 
 Requires a one-time OAuth2 setup that a human must complete (Google Cloud
 Console + browser consent) — see scripts/setup_gmail_oauth.py and the
