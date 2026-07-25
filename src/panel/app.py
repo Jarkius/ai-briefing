@@ -111,7 +111,13 @@ def _job_fragment(job_id: str) -> str:
     drop the attribute, which is how htmx polling stops."""
     job = jobs.get(job_id)
     if job is None:
-        return '<div class="banner banner-err">unknown job</div>'
+        # Most common cause: the server restarted while a tab was open —
+        # jobs live in this process only, so old polling fragments outlive
+        # their jobs. Terminal fragment (no hx-trigger) stops the polling.
+        return (
+            '<div class="banner banner-warn">job no longer exists — the server was '
+            'restarted (jobs don\'t survive restarts). Refresh the page.</div>'
+        )
     phase = html_lib.escape(job.phase_text)
     if job.status == "running":
         return (
