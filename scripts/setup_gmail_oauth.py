@@ -82,6 +82,10 @@ def main():
 
     with open(gmail_api.TOKEN_PATH, "w") as f:
         f.write(creds.to_json())
+    # Owner-only, like .env — the token grants gmail.modify (read+send) and
+    # the client secret identifies the OAuth app. Default umask is 0644.
+    os.chmod(gmail_api.TOKEN_PATH, 0o600)
+    os.chmod(gmail_api.CLIENT_SECRET_PATH, 0o600)
 
     print(f"\nDone. Token saved to {gmail_api.TOKEN_PATH}.")
     print("The Gmail API fallback is now active — run.py will use it")

@@ -47,6 +47,9 @@ def _get_credentials():
         creds.refresh(Request())
         with open(TOKEN_PATH, "w") as f:
             f.write(creds.to_json())
+        # gmail.modify scope = full mailbox read+send; default umask leaves
+        # the rewritten token world-readable. Keep it owner-only, like .env.
+        os.chmod(TOKEN_PATH, 0o600)
     return creds
 
 

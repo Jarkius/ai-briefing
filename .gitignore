@@ -1,8 +1,11 @@
 # Cache and temporary files
 .seen_cache.json
 
-# Secrets — never commit
+# Secrets — never commit (.env.* catches backups like .env.bak-YYYY-MM-DD,
+# which hold the same live credentials and once nearly reached `git add -A`)
 .env
+.env.*
+!.env.example
 
 # Email credentials (if stored separately) — root-level only;
 # src/briefing/config.py is code (env reads, no secrets) and IS tracked

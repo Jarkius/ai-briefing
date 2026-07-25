@@ -5,9 +5,14 @@ No network, no real MCP server — session.call_tool is an AsyncMock.
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from briefing.researcher import classify, parse_requests, research_one
+from briefing.researcher import _public_url_error, classify, parse_requests, research_one
+
+
+def _allow_all_urls():
+    """Bypass the SSRF guard's real DNS lookup — this suite runs no-network."""
+    return patch("briefing.researcher._public_url_error", return_value=None)
 
 
 def _text_result(text: str):
@@ -77,7 +82,8 @@ def test_research_one_youtube_calls_transcribe_video():
     session = AsyncMock()
     session.call_tool.return_value = _text_result("transcript text")
 
-    result = asyncio.run(research_one(session, "https://youtu.be/abc123"))
+    with _allow_all_urls():
+        result = asyncio.run(research_one(session, "https://youtu.be/abc123"))
 
     session.call_tool.assert_awaited_once_with(
         "transcribe_video", {"url": "https://youtu.be/abc123"}
@@ -89,7 +95,8 @@ def test_research_one_url_calls_visit_page():
     session = AsyncMock()
     session.call_tool.return_value = _text_result("page content")
 
-    result = asyncio.run(research_one(session, "https://example.com/article"))
+    with _allow_all_urls():
+        result = asyncio.run(research_one(session, "https://example.com/article"))
 
     session.call_tool.assert_awaited_once_with(
         "visit_page", {"url": "https://example.com/article"}
@@ -120,7 +127,8 @@ def test_research_one_url_failure_is_caught_not_raised():
     session = AsyncMock()
     session.call_tool.side_effect = RuntimeError("boom")
 
-    result = asyncio.run(research_one(session, "https://example.com/article"))
+    with _allow_all_urls():
+        result = asyncio.run(research_one(session, "https://example.com/article"))
 
     assert "page fetch failed" in result
     assert "boom" in result
@@ -136,3 +144,35 @@ def test_research_one_topic_google_blocked_is_noted_not_raised():
     result = asyncio.run(research_one(session, "some topic"))
 
     assert "blocked by bot detection" in result
+
+
+# ---- SSRF guard (_public_url_error) ------------------------------------------
+# Loopback resolution needs no real DNS, so these run offline.
+
+
+def test_ssrf_guard_refuses_loopback():
+    assert _public_url_error("http://127.0.0.1:8787/admin") is not None
+
+
+def test_ssrf_guard_refuses_localhost_name():
+    assert _public_url_error("http://localhost/") is not None
+
+
+def test_ssrf_guard_refuses_metadata_ip():
+    assert _public_url_error("http://169.254.169.254/latest/meta-data/") is not None
+
+
+def test_ssrf_guard_refuses_private_range():
+    assert _public_url_error("http://192.168.1.1/") is not None
+
+
+def test_research_one_refuses_private_url_without_calling_tool():
+    session = AsyncMock()
+    result = asyncio.run(research_one(session, "http://127.0.0.1:8787/steal"))
+    session.call_tool.assert_not_awaited()
+    assert "refused" in result
+
+
+def test_ssrf_guard_allows_public_ip():
+    # 1.1.1.1 is a literal global IP — no DNS needed
+    assert _public_url_error("https://1.1.1.1/") is None

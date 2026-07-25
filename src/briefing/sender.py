@@ -300,10 +300,15 @@ def _send_via_outlook(subject: str, html: str) -> None:
             tmp_path = f.name
 
         escaped_subject = subject.replace("'", "''")
+        # Recipients get the same ''-escaping as the subject: RECIPIENT_EMAIL
+        # comes from .env today but becomes web-form-editable via the planned
+        # control panel — a quote in an address must not break out of the PS
+        # string (command injection in the user's session).
+        escaped_to = "; ".join(r.replace("'", "''") for r in config.RECIPIENT_EMAILS)
         ps_script = f"""
 $ol = New-Object -ComObject Outlook.Application
 $mail = $ol.CreateItem(0)
-$mail.To = '{"; ".join(config.RECIPIENT_EMAILS)}'
+$mail.To = '{escaped_to}'
 $mail.Subject = '{escaped_subject}'
 $mail.HTMLBody = [IO.File]::ReadAllText('{tmp_path}')
 $mail.Send()

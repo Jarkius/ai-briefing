@@ -14,7 +14,10 @@ Findings are returned as a single text block the generator prepends as a
 """
 
 import asyncio
+import ipaddress
 import re
+import socket
+import urllib.parse
 from datetime import datetime
 
 from . import config, mcp_client
@@ -22,6 +25,26 @@ from . import config, mcp_client
 CHECKBOX_RE = re.compile(r"^- \[( |x)\] (.+)$")
 YOUTUBE_RE = re.compile(r"(youtube\.com/watch|youtu\.be/)")
 URL_RE = re.compile(r"https?://\S+")
+
+
+def _public_url_error(url: str) -> str | None:
+    """SSRF guard for URLs we fetch server-side (visit_page/transcribe run a
+    real headless browser). Requests come from a git-committed file today,
+    but the control panel plan exposes them via a live web form — a pasted
+    metadata/loopback/LAN address must not be fetched and folded into the
+    newsletter. Returns a reason string if the URL must be refused."""
+    host = urllib.parse.urlparse(url).hostname
+    if not host:
+        return "no hostname"
+    try:
+        addrinfos = socket.getaddrinfo(host, None)
+    except OSError as e:
+        return f"could not resolve host: {e}"
+    for info in addrinfos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            return f"resolves to non-public address {ip}"
+    return None
 
 
 def log(msg: str):
@@ -59,9 +82,12 @@ async def research_one(session, request_text: str, phase_cb=None) -> str:
     if kind == "youtube":
         if phase_cb:
             phase_cb("transcribing video…")
-        url_match = URL_RE.search(request_text)
+        url = URL_RE.search(request_text).group(0)
+        refusal = _public_url_error(url)
+        if refusal:
+            return f"### {request_text}\n\n(refused: {refusal})"
         try:
-            result = await session.call_tool("transcribe_video", {"url": url_match.group(0)})
+            result = await session.call_tool("transcribe_video", {"url": url})
             return f"### {request_text}\n\n{mcp_client.tool_text(result)}"
         except Exception as e:
             return f"### {request_text}\n\n(transcription failed: {e})"
@@ -69,9 +95,12 @@ async def research_one(session, request_text: str, phase_cb=None) -> str:
     if kind == "url":
         if phase_cb:
             phase_cb("fetching page…")
-        url_match = URL_RE.search(request_text)
+        url = URL_RE.search(request_text).group(0)
+        refusal = _public_url_error(url)
+        if refusal:
+            return f"### {request_text}\n\n(refused: {refusal})"
         try:
-            result = await session.call_tool("visit_page", {"url": url_match.group(0)})
+            result = await session.call_tool("visit_page", {"url": url})
             return f"### {request_text}\n\n{mcp_client.tool_text(result)}"
         except Exception as e:
             return f"### {request_text}\n\n(page fetch failed: {e})"
