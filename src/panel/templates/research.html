@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Research</h1>
+
+<form hx-post="/research/run" hx-target="#banner" hx-swap="innerHTML">
+  <textarea name="text" rows="4" placeholder="Paste a YouTube URL, article URL, or topic — one per line. Leave empty to run any unchecked requests."></textarea>
+  <div class="actions" style="margin-top:0.6rem">
+    <button type="submit">Run research</button>
+  </div>
+</form>
+
+<div id="banner">{% if live_fragment %}{{ live_fragment | safe }}{% endif %}</div>
+
+<h2 class="muted" style="margin-top:2rem">Requests (newest first)</h2>
+<ul class="requests">
+  {% for r in requests %}
+  <li class="{{ 'done' if r.checked else 'pending' }}">
+    <span class="tick">{{ '☑' if r.checked else '☐' }}</span> {{ r.text }}
+  </li>
+  {% else %}
+  <li class="muted">none yet</li>
+  {% endfor %}
+</ul>
+{% endblock %}

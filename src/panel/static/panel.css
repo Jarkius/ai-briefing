@@ -60,6 +60,21 @@ button:hover { border-color: var(--muted); }
 .banner-warn { background: #2a2410; color: var(--accent); border: 1px solid var(--accent); }
 .banner-err { background: #2b1717; color: var(--err); border: 1px solid var(--err); }
 
+textarea, input[type="text"], input[type="password"], input[type="time"], select {
+  width: 100%;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid #3a3944;
+  border-radius: 4px;
+  padding: 0.6rem;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.85rem;
+}
+.requests { list-style: none; padding: 0; }
+.requests li { padding: 0.35rem 0; border-bottom: 1px solid #26252c; font-size: 0.92rem; }
+.requests li.done { color: var(--muted); }
+.requests .tick { font-family: ui-monospace, monospace; margin-right: 0.4rem; }
+
 /* the letter on the desk — email preview card, deliberately not dark */
 .letter { margin: 1.6rem 0; }
 .letter h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }

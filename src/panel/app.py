@@ -10,8 +10,11 @@ reverse — the CLI must keep working in a venv without FastAPI installed.
 
 import html as html_lib
 import os
+import subprocess
 import sys
 from datetime import datetime
+
+from fastapi import Form
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -22,7 +25,7 @@ from starlette.requests import Request
 # src/ on the path so `from briefing import ...` works however uvicorn is cwd'd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from briefing import db, generator, mcp_client, sender  # noqa: E402
+from briefing import config, db, generator, mcp_client, researcher, sender  # noqa: E402
 
 from . import jobs, state  # noqa: E402
 
@@ -132,6 +135,79 @@ def _job_fragment(job_id: str) -> str:
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
 async def job_status(job_id: str):
+    return HTMLResponse(_job_fragment(job_id))
+
+
+# ---- research ----------------------------------------------------------------
+
+
+def _pathspec_commit(message: str, path: str) -> str | None:
+    """Pathspec-restricted commit (never bare / add -A — a user's manually
+    staged files must never be swept in). Returns an error string for the
+    banner, or None on success. 'nothing to commit' is not an error."""
+    try:
+        subprocess.run(["git", "add", "--", path], cwd=config.REPO_ROOT,
+                       capture_output=True, text=True, timeout=15, check=True)
+        r = subprocess.run(["git", "commit", "-m", message, "--", path],
+                           cwd=config.REPO_ROOT, capture_output=True, text=True, timeout=15)
+        if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
+            return (r.stderr or r.stdout).strip()[:200]
+        return None
+    except Exception as e:
+        return str(e)[:200]
+
+
+async def _research_job(phase) -> str:
+    """Async job: acquire the cross-process lock INSIDE the task (review m5 —
+    a sync context manager entered in the route would release at route
+    return), then run all pending requests with live phase text."""
+    with mcp_client.mcp_lock(retry_seconds=0):
+        findings, count = await researcher.run_pending_async(phase_cb=phase)
+    if count:
+        err = _pathspec_commit(
+            "dashboard: research request completed", config.RESEARCH_REQUESTS_PATH
+        )
+        if err:
+            findings += f"\n\n(note: git commit failed: {err})"
+    return findings if count else "no unchecked requests found"
+
+
+@app.get("/research", response_class=HTMLResponse)
+async def research(request: Request):
+    reqs = []
+    if os.path.exists(config.RESEARCH_REQUESTS_PATH):
+        with open(config.RESEARCH_REQUESTS_PATH) as f:
+            reqs = researcher.parse_requests(f.read())
+    reqs.reverse()  # newest first
+    # AC7 — a reload reattaches to any live job by re-rendering its polling
+    # fragment (in-memory registry is the only place the job exists).
+    live = next(
+        (jid for jid, j in jobs.JOBS.items()
+         if j.name == "research" and j.status == "running"),
+        None,
+    )
+    return templates.TemplateResponse(
+        request, "research.html",
+        {"active": "research", "requests": reqs,
+         "live_fragment": _job_fragment(live) if live else None},
+    )
+
+
+@app.post("/research/run", response_class=HTMLResponse)
+async def research_run(text: str = Form("")):
+    text = text.strip()
+    # Fast pre-reject; the real acquire happens inside the task (TOCTOU gap
+    # acceptable single-user — the in-task lock still guarantees exclusion).
+    if mcp_client.is_locked():
+        return HTMLResponse(
+            '<div class="banner banner-warn">Collection is running (lock held) — try again in a minute.</div>'
+        )
+    if text:
+        # Append pasted requests as unchecked lines; the job picks them up.
+        lines = [f"- [ ] {ln.strip()}" for ln in text.splitlines() if ln.strip()]
+        with open(config.RESEARCH_REQUESTS_PATH, "a") as f:
+            f.write("\n" + "\n".join(lines) + "\n")
+    job_id = jobs.submit_async("research", _research_job)
     return HTMLResponse(_job_fragment(job_id))
 
 
