@@ -8,8 +8,10 @@ Import direction invariant: src/panel imports src/briefing, never the
 reverse — the CLI must keep working in a venv without FastAPI installed.
 """
 
+import html as html_lib
 import os
 import sys
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -20,9 +22,9 @@ from starlette.requests import Request
 # src/ on the path so `from briefing import ...` works however uvicorn is cwd'd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from briefing import mcp_client  # noqa: E402
+from briefing import db, generator, mcp_client, sender  # noqa: E402
 
-from . import jobs  # noqa: E402
+from . import jobs, state  # noqa: E402
 
 PANEL_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -38,7 +40,99 @@ async def index():
 
 @app.get("/preview", response_class=HTMLResponse)
 async def preview(request: Request):
-    return templates.TemplateResponse(request, "preview.html", {"active": "preview"})
+    gen = state.get_generation()
+    return templates.TemplateResponse(
+        request, "preview.html", {"active": "preview", "gen": gen}
+    )
+
+
+def _regenerate_job() -> dict:
+    """Blocking: run generate() against current DB state, tracked in a
+    dashboard-source runs row. Runs on a worker thread via submit_sync."""
+    conn = db.connect()
+    try:
+        run_id = db.insert_run(conn, source="dashboard", started_at=datetime.now().isoformat())
+        try:
+            result = generator.generate(conn, research_findings="")
+            db.update_run(conn, run_id, generate_status="ok")
+        except Exception as e:
+            db.update_run(conn, run_id, generate_status="error", error_text=str(e)[:500])
+            raise
+    finally:
+        conn.close()
+    state.set_generation(result)
+    return result
+
+
+def _send_job() -> dict:
+    """Blocking: send the last generation, tracked in a dashboard runs row."""
+    gen = state.get_generation()
+    if gen is None:
+        raise RuntimeError("nothing generated yet — regenerate first")
+    conn = db.connect()
+    try:
+        run_id = db.insert_run(conn, source="dashboard", started_at=datetime.now().isoformat())
+        result = sender.send_two_part_briefing(
+            gen["part1_html"], gen["part2_html"], gen["date_str"]
+        )
+        ok = all(not str(v).startswith("error") for v in result.values())
+        db.update_run(
+            conn, run_id,
+            send_status="ok" if ok else "error",
+            error_text="" if ok else str(result)[:500],
+        )
+    finally:
+        conn.close()
+    return result
+
+
+@app.post("/preview/regenerate", response_class=HTMLResponse)
+async def preview_regenerate():
+    job_id = jobs.submit_sync("regenerate", _regenerate_job)
+    return HTMLResponse(_job_fragment(job_id))
+
+
+@app.post("/preview/send", response_class=HTMLResponse)
+async def preview_send():
+    if state.get_generation() is None:
+        return HTMLResponse('<div class="banner banner-err">Nothing generated yet — regenerate first.</div>')
+    job_id = jobs.submit_sync("send", _send_job)
+    return HTMLResponse(_job_fragment(job_id))
+
+
+def _job_fragment(job_id: str) -> str:
+    """Polling fragment: keeps hx-trigger while running; terminal renders
+    drop the attribute, which is how htmx polling stops."""
+    job = jobs.get(job_id)
+    if job is None:
+        return '<div class="banner banner-err">unknown job</div>'
+    phase = html_lib.escape(job.phase_text)
+    if job.status == "running":
+        return (
+            f'<div class="banner banner-live" hx-get="/jobs/{job_id}" '
+            f'hx-trigger="every 2s" hx-swap="outerHTML">'
+            f'⟳ {html_lib.escape(job.name)}: {phase}</div>'
+        )
+    if job.status == "error":
+        return f'<div class="banner banner-err">✗ {html_lib.escape(job.name)} failed: {phase}</div>'
+    # done
+    if job.name == "send" and isinstance(job.result, dict):
+        parts = ", ".join(f"{k}: {v}" for k, v in job.result.items())
+        already = all(v == "already_sent" for v in job.result.values())
+        css = "banner-warn" if already else "banner-ok"
+        note = "already sent today — nothing re-sent" if already else "sent"
+        return f'<div class="banner {css}">✓ {note} ({html_lib.escape(parts)})</div>'
+    if job.name == "regenerate":
+        return (
+            '<div class="banner banner-ok" hx-get="/preview" hx-trigger="load delay:1s" '
+            'hx-target="body" hx-swap="innerHTML">✓ regenerated — refreshing preview…</div>'
+        )
+    return f'<div class="banner banner-ok">✓ {html_lib.escape(job.name)} done</div>'
+
+
+@app.get("/jobs/{job_id}", response_class=HTMLResponse)
+async def job_status(job_id: str):
+    return HTMLResponse(_job_fragment(job_id))
 
 
 @app.get("/status", response_class=HTMLResponse)

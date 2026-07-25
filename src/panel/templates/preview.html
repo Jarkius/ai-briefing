@@ -1,5 +1,29 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Preview</h1>
-<p class="muted">No generation in this session yet — regenerate to render the current DB state. (S3 wires this up.)</p>
+<div class="page-head">
+  <h1>Preview</h1>
+  <div class="actions">
+    <button hx-post="/preview/regenerate" hx-target="#banner" hx-swap="innerHTML">Regenerate</button>
+    <button class="btn-send" hx-post="/preview/send" hx-target="#banner" hx-swap="innerHTML"
+            hx-confirm="Send both parts to the configured recipients now?">Send</button>
+  </div>
+</div>
+<div id="banner"></div>
+
+{% if gen %}
+<p class="muted">Generated {{ gen.date_str }} — exactly what sender would email (same in-memory HTML).</p>
+<section class="letter">
+  <h2>Part 1 · News &amp; Learning</h2>
+  <iframe class="mail-frame" srcdoc="{{ gen.part1_html | e }}" sandbox=""></iframe>
+</section>
+<section class="letter">
+  <h2>Part 2 · Technical &amp; Community</h2>
+  <iframe class="mail-frame" srcdoc="{{ gen.part2_html | e }}" sandbox=""></iframe>
+</section>
+{% else %}
+<p class="muted">No generation in this server session yet. Preview shows the exact
+in-memory HTML that send uses — archives store only markdown, so a re-render on a
+later day would carry the wrong date. Click <strong>Regenerate</strong> to render
+the current DB state.</p>
+{% endif %}
 {% endblock %}
