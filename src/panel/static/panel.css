@@ -1,0 +1,40 @@
+/* Dark editorial desk — minimal S1 base; full theme lands in S6. */
+:root {
+  --bg: #16151a;
+  --panel: #1e1d24;
+  --ink: #e8e4dc;
+  --muted: #8d8a93;
+  --accent: #e0a35c; /* live/running + send */
+  --ok: #7fb069;
+  --err: #c05252;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Palatino", Georgia, serif;
+}
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 2rem;
+  padding: 0.9rem 1.5rem;
+  background: var(--panel);
+  border-bottom: 1px solid #2c2b33;
+}
+.brand { font-weight: 700; letter-spacing: 0.04em; }
+nav { display: flex; gap: 1.1rem; flex: 1; }
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  text-transform: capitalize;
+  font-size: 0.95rem;
+}
+nav a.active, nav a:hover { color: var(--ink); }
+.dot { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; }
+.dot-idle { color: var(--ok); }
+.dot-busy { color: var(--accent); }
+.dot-lock { color: var(--err); }
+main { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+.muted { color: var(--muted); }

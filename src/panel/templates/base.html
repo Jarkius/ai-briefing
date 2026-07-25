@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Briefing — Control Panel</title>
+<link rel="stylesheet" href="/static/panel.css">
+<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">AI&nbsp;Briefing</span>
+  <nav>
+    {% for tab in ["preview", "research", "style", "sources", "schedule", "settings", "logs"] %}
+    <a href="/{{ tab }}" class="{{ 'active' if active == tab else '' }}">{{ tab }}</a>
+    {% endfor %}
+  </nav>
+  <span id="status-dot" class="dot dot-idle" hx-get="/status" hx-trigger="load, every 3s" hx-swap="outerHTML">●</span>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
