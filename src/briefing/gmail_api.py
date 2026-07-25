@@ -63,7 +63,7 @@ def send_email_via_api(subject: str, html: str) -> None:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"AI Briefing <{config.GMAIL_ADDRESS}>"
-    msg["To"] = config.RECIPIENT_EMAIL
+    msg["To"] = ", ".join(config.RECIPIENT_EMAILS)
     msg.attach(MIMEText(html, "html"))
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()

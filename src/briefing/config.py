@@ -65,6 +65,10 @@ CLAUDE_CLI_MODEL = os.environ.get("CLAUDE_CLI_MODEL", "sonnet")
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
+# Comma-separated in .env; every send path needs the parsed list (SMTP's
+# to_addrs and Outlook's To take all recipients, a bare comma string would
+# silently deliver to only the first).
+RECIPIENT_EMAILS = [e.strip() for e in RECIPIENT_EMAIL.split(",") if e.strip()]
 
 REQUIRED_ENV = {
     "GMAIL_ADDRESS": GMAIL_ADDRESS,

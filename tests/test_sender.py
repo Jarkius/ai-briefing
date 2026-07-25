@@ -161,6 +161,24 @@ def test_already_sent_today_raises_when_all_transports_exhausted():
             already_sent_today("AI Briefing Part 1")
 
 
+# ---- multi-recipient To handling --------------------------------------------
+
+
+def test_send_email_smtp_delivers_to_all_recipients():
+    server = MagicMock()
+    server.__enter__.return_value = server
+    server.__exit__.return_value = False
+    recipients = ["a@example.com", "b@example.com"]
+    with _api_unconfigured(), \
+         patch("briefing.sender.config.RECIPIENT_EMAILS", recipients), \
+         patch("briefing.sender.smtplib.SMTP_SSL", return_value=server):
+        send_email("subject", "<p>html</p>")
+    # sendmail must get the LIST — a comma-joined string would deliver to
+    # only the first address.
+    args = server.sendmail.call_args[0]
+    assert args[1] == recipients
+
+
 # ---- send_email: Gmail API primary -> SMTP -> Outlook COM (win32) -----------
 
 

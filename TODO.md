@@ -52,6 +52,11 @@ Not started beyond scaffolding — `src/panel/` has only empty `__init__.py`, `s
 
 ## Work log (newest first — append a timestamped entry per session)
 
+### 2026-07-25 20:13 (multi-recipient + full scheduled test through API path)
+- **Second recipient added**: `RECIPIENT_EMAIL=juckrit@gmail.com,jsanitareephon@deloitte.com` (.env, comma-separated). Config now parses `RECIPIENT_EMAILS` list; all three transports updated (Gmail API + SMTP `sendmail` gets the list — a joined string would silently deliver only to the first; Outlook COM gets `;`-joined To).
+- **Full scheduled launchd test at 20:13 PASSED**: Collect (5 new items) → Generate (6/6 Gemini) → Send both parts **via Gmail API (HTTPS/443)** — first scheduled run through the API-first path, log shows `sent via Gmail API` twice. Whole run ~61s.
+- Schedule restored to 05:00, plist reloaded + verified. 79 tests green.
+
 ### 2026-07-25 ~20:00 (Gmail API primary + sender switch)
 - **Sender identity switched to `jarkius.ai@gmail.com`** (`.env` GMAIL_ADDRESS; recipient stays juckrit@gmail.com; backup `.env.bak-2026-07-25`). Keeps OAuth token + app password off the personal account.
 - **One-time OAuth done on this Mac** (user consent in browser): `data/gmail_oauth_client_secret.json` + `data/gmail_oauth_token.json` (both gitignored, per-machine). First 403 was the test-user gate — fixed by adding jarkius.ai as test user.

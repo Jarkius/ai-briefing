@@ -303,7 +303,7 @@ def _send_via_outlook(subject: str, html: str) -> None:
         ps_script = f"""
 $ol = New-Object -ComObject Outlook.Application
 $mail = $ol.CreateItem(0)
-$mail.To = '{config.RECIPIENT_EMAIL}'
+$mail.To = '{"; ".join(config.RECIPIENT_EMAILS)}'
 $mail.Subject = '{escaped_subject}'
 $mail.HTMLBody = [IO.File]::ReadAllText('{tmp_path}')
 $mail.Send()
@@ -358,7 +358,7 @@ def send_email(subject: str, html: str) -> None:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"AI Briefing <{config.GMAIL_ADDRESS}>"
-    msg["To"] = config.RECIPIENT_EMAIL
+    msg["To"] = ", ".join(config.RECIPIENT_EMAILS)
     msg.attach(MIMEText(html, "html"))
 
     # `with smtplib.SMTP(...) as server:` calls server.quit() on exit, which
@@ -374,7 +374,7 @@ def send_email(subject: str, html: str) -> None:
         try:
             with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
                 server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
-                server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+                server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAILS, msg.as_string())
                 sent = True
         except Exception:
             if sent:
@@ -389,7 +389,7 @@ def send_email(subject: str, html: str) -> None:
                 server.ehlo()
                 server.starttls()
                 server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
-                server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+                server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAILS, msg.as_string())
                 sent = True
         except Exception:
             if sent:
