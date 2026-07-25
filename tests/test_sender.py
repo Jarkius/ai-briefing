@@ -177,6 +177,27 @@ def test_send_email_falls_back_to_gmail_api_on_darwin_when_configured():
     mock_api_send.assert_called_once_with("subject", "<p>html</p>")
 
 
+def _mock_smtp_ssl_sendmail_ok_but_quit_fails():
+    """Reproduces the real bug found 2026-07-25: sendmail() succeeds but the
+    connection resets during __exit__'s QUIT, which smtplib only swallows
+    for SMTPServerDisconnected — not ConnectionResetError. Without the
+    sent-flag fix, this exception looked identical to a failed send and
+    _with_retry resent the same email, causing 2 real duplicate sends
+    (4 emails delivered for what should have been 2)."""
+    server = MagicMock()
+    server.sendmail = MagicMock()  # succeeds
+    server.__enter__.return_value = server
+    server.__exit__.side_effect = ConnectionResetError("reset during QUIT")
+    return patch("briefing.sender.smtplib.SMTP_SSL", return_value=server), server
+
+
+def test_send_email_does_not_resend_when_only_smtp_quit_fails():
+    ctx, server = _mock_smtp_ssl_sendmail_ok_but_quit_fails()
+    with ctx, patch("briefing.sender.time.sleep"):
+        send_email("subject", "<p>html</p>")
+    server.sendmail.assert_called_once()  # not retried/resent
+
+
 def test_send_email_raises_original_smtp_error_when_gmail_api_unconfigured():
     with patch("briefing.sender.sys.platform", "darwin"), \
          _mock_smtp_ssl_failing(), _mock_smtp_failing(), \

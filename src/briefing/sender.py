@@ -348,17 +348,41 @@ def send_email(subject: str, html: str) -> None:
     msg["To"] = config.RECIPIENT_EMAIL
     msg.attach(MIMEText(html, "html"))
 
+    # `with smtplib.SMTP(...) as server:` calls server.quit() on exit, which
+    # sends its own QUIT command over the (possibly already-flaky)
+    # connection. smtplib's __exit__ only swallows SMTPServerDisconnected —
+    # a ConnectionResetError/OSError during that post-send QUIT propagates
+    # as if the whole call failed, even though sendmail() already
+    # succeeded. _with_retry would then resend the same email. Fix: track
+    # whether sendmail() itself completed, and treat a cleanup-only failure
+    # after that point as a warning, not a reason to retry/resend.
     def _via_465():
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
-            server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
-            server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+        sent = False
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
+                server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
+                server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+                sent = True
+        except Exception:
+            if sent:
+                print("SMTP:465 sendmail succeeded but QUIT/close failed — not resending", flush=True)
+                return
+            raise
 
     def _via_587():
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
-            server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+        sent = False
+        try:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
+                server.sendmail(config.GMAIL_ADDRESS, config.RECIPIENT_EMAIL, msg.as_string())
+                sent = True
+        except Exception:
+            if sent:
+                print("SMTP:587 sendmail succeeded but QUIT/close failed — not resending", flush=True)
+                return
+            raise
 
     try:
         _with_retry(_via_465, max_attempts=2, label="SMTP:465")
