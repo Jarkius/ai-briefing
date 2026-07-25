@@ -12,6 +12,7 @@ from briefing.generator import (
     TOTAL_CHAR_BUDGET,
     TRANSCRIPT_CHAR_CAP,
     _cap_transcript,
+    _claude_cli_call,
     _grok_call,
     _rendered_size,
     _sanitize,
@@ -223,8 +224,12 @@ def test_503_retries_before_succeeding():
 
 
 def test_both_providers_fail_raises():
+    # Claude CLI is the 3rd fallback tier (see _claude_cli_call) — disabled
+    # here so a real `claude` binary on the test machine's PATH can't mask
+    # the HTTP-tier failure this test is asserting on.
     with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
          patch.object(config, "GEMINI_API_KEY", "g-key"), \
+         patch.object(config, "CLAUDE_CLI_ENABLED", False), \
          patch("urllib.request.urlopen") as urlopen, \
          patch("time.sleep"):
         urlopen.side_effect = [_http_error(503), _http_error(503), _http_error(500), _http_error(500)]
@@ -238,6 +243,7 @@ def test_both_providers_fail_raises():
 def test_no_gemini_api_key_raises_maxplus_error():
     with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
          patch.object(config, "GEMINI_API_KEY", ""), \
+         patch.object(config, "CLAUDE_CLI_ENABLED", False), \
          patch("urllib.request.urlopen") as urlopen, \
          patch("time.sleep"):
         urlopen.side_effect = [_http_error(402, b'{"error": "insufficient_credit"}')]
@@ -248,3 +254,86 @@ def test_no_gemini_api_key_raises_maxplus_error():
             assert e.code == 402
 
     assert urlopen.call_count == 1  # no Gemini fallback attempted
+
+
+# ---- _claude_cli_call: subprocess.run("claude -p ...") --------------------
+
+
+def _cli_result(returncode=0, stdout="claude reply", stderr=""):
+    result = MagicMock()
+    result.returncode = returncode
+    result.stdout = stdout
+    result.stderr = stderr
+    return result
+
+
+def test_claude_cli_call_returns_stdout_on_success():
+    with patch("briefing.generator.subprocess.run", return_value=_cli_result()) as run:
+        result = _claude_cli_call("sys", "user")
+
+    assert result == "claude reply"
+    args, kwargs = run.call_args
+    assert args[0] == ["claude", "-p", "--model", config.CLAUDE_CLI_MODEL, "-"]
+    assert kwargs["input"] == "sys\n\nuser"
+    assert kwargs["timeout"] == 300
+
+
+def test_claude_cli_call_raises_on_nonzero_exit():
+    with patch("briefing.generator.subprocess.run", return_value=_cli_result(returncode=1, stdout="", stderr="boom")):
+        try:
+            _claude_cli_call("sys", "user")
+            assert False, "expected an exception"
+        except RuntimeError as e:
+            assert "boom" in str(e)
+
+
+def test_claude_cli_call_raises_on_empty_stdout():
+    with patch("briefing.generator.subprocess.run", return_value=_cli_result(returncode=0, stdout="   ")):
+        try:
+            _claude_cli_call("sys", "user")
+            assert False, "expected an exception"
+        except RuntimeError:
+            pass
+
+
+# ---- _grok_call: full chain including the Claude CLI safety net -----------
+
+
+def test_claude_cli_tier_skipped_when_not_installed():
+    with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
+         patch.object(config, "GEMINI_API_KEY", "g-key"), \
+         patch.object(config, "CLAUDE_CLI_ENABLED", True), \
+         patch("urllib.request.urlopen") as urlopen, \
+         patch("briefing.generator.shutil.which", return_value=None), \
+         patch("briefing.generator.subprocess.run") as cli_run, \
+         patch("time.sleep"):
+        urlopen.side_effect = [
+            _http_error(402, b'{"error": "insufficient_credit"}'),
+            _http_error(429),
+            _http_error(429),
+        ]
+        try:
+            _grok_call("sys", "user", max_attempts=2)
+            assert False, "expected an exception"
+        except urllib.error.HTTPError:
+            pass
+
+    cli_run.assert_not_called()
+
+
+def test_full_chain_falls_through_to_claude_cli():
+    with patch.object(config, "MAXPLUS_API_KEY", "mp-key"), \
+         patch.object(config, "GEMINI_API_KEY", "g-key"), \
+         patch.object(config, "CLAUDE_CLI_ENABLED", True), \
+         patch("urllib.request.urlopen") as urlopen, \
+         patch("briefing.generator.shutil.which", return_value="/usr/local/bin/claude"), \
+         patch("briefing.generator.subprocess.run", return_value=_cli_result(stdout="claude reply")), \
+         patch("time.sleep"):
+        urlopen.side_effect = [
+            _http_error(402, b'{"error": "insufficient_credit"}'),  # maxplus fails fast
+            _http_error(429),  # gemini exhausts retries
+            _http_error(429),
+        ]
+        result = _grok_call("sys", "user", max_attempts=2)
+
+    assert result == "claude reply"

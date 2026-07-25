@@ -159,15 +159,55 @@ single-file implementations (hand-rolled fetchers, no database), kept for
 reference — nothing is deleted. See `docs/poc-noapi-google-search-mcp.md`
 for why the MCP-based collector replaced them.
 
+## Gmail API fallback (networks that block SMTP/IMAP)
+
+Some networks only allow outbound HTTPS (port 443) and block the raw
+SMTP/IMAP protocol ports (465/587/993) — confirmed on at least one office
+network this project runs on: TLS handshakes to `smtp.gmail.com` /
+`imap.gmail.com` reset consistently there, while HTTPS to Google works fine.
+
+`sender.py` tries SMTP first (no setup needed, works on most networks) and
+automatically falls back to the Gmail API over HTTPS if SMTP fails and the
+fallback is configured. Setup is one-time and needs a real browser login
+(this can't be scripted around — Google requires an explicit consent click):
+
+```bash
+.venv/bin/python scripts/setup_gmail_oauth.py
+```
+
+The script prints exact URLs for creating a Google Cloud project + OAuth
+"Desktop app" credentials, then opens a browser for the consent screen and
+saves a refresh token to `data/gmail_oauth_token.json` (gitignored,
+per-machine — never commit it). After that, `run.py` uses it automatically
+whenever SMTP fails; no `.env` changes needed.
+
+On Windows, the fallback chain is SMTP → Outlook COM automation instead
+(requires a local Outlook install) — the Gmail API fallback only applies on
+macOS/Linux where there's no Outlook to fall back to.
+
 ## Troubleshooting
 
 ### Gemini returns HTTP 400 "model not available"
 The maxplus pool's available models change over time. The 400 response body
 lists currently valid model names — update `MAXPLUS_MODEL` in `.env`.
+Likewise, `gemini-3.5-flash` was never a real Gemini model name (verified
+against the API's own model list) — use `GEMINI_MODEL=gemini-flash-latest`
+or another name from `https://generativelanguage.googleapis.com/v1beta/models`.
 
-### Gmail SMTP errors
+### Gmail SMTP/IMAP errors, or "Connection reset by peer"
 Enable 2FA on the Gmail account and use an App Password, not the regular
-password.
+password. If the error is specifically a connection reset (not an auth
+failure) and persists across retries, the network is likely blocking the
+SMTP/IMAP protocol ports — see "Gmail API fallback" above.
+
+### A leftover shell environment variable overrides `.env`
+`MAXPLUS_API_KEY` in particular is also used by unrelated dev tooling (e.g.
+some Claude Code shell configs export it globally). `config.py`'s `.env`
+loader overrides ambient shell exports for every key it reads, so a value
+set in `.env` (including intentionally commenting a key out) always wins —
+but this only applies to processes that actually load `.env` via
+`config.py`; a raw `echo $MAXPLUS_API_KEY` in your shell will still show
+whatever's exported there, which is expected and harmless.
 
 ### `data/.mcp.lock` seems stuck
 The lock (`fcntl.flock`) releases automatically when its holding process

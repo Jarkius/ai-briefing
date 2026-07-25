@@ -9,8 +9,12 @@ output to what actually gets emailed — no second render path.
 
 import html as html_lib
 import imaplib
+import os
 import re
 import smtplib
+import subprocess
+import sys
+import tempfile
 import time
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -274,6 +278,49 @@ def split_two_parts(markdown_text: str) -> tuple[str, str]:
     return part1, part2
 
 
+def _send_via_outlook(subject: str, html: str) -> None:
+    """Send using the local Outlook client via PowerShell COM automation —
+    port of legacy/ai_briefing.py:_send_via_outlook (lines 811-834). Only
+    meaningful on win32 (requires a local Outlook install + interactive
+    desktop session; COM automation is unavailable headless/non-Windows).
+
+    The html body and subject are NEVER inlined into the PowerShell command
+    string — subject/body content originates from LLM output over
+    untrusted feed data, and interpolating it into a shell command would be
+    a command-injection vector. Instead: the html is written to a temp file
+    that the PS script reads with [IO.File]::ReadAllText, and the subject is
+    escaped for a PS single-quoted string ('' doubling) and passed as its
+    own literal."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".html", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(html)
+            tmp_path = f.name
+
+        escaped_subject = subject.replace("'", "''")
+        ps_script = f"""
+$ol = New-Object -ComObject Outlook.Application
+$mail = $ol.CreateItem(0)
+$mail.To = '{config.RECIPIENT_EMAIL}'
+$mail.Subject = '{escaped_subject}'
+$mail.HTMLBody = [IO.File]::ReadAllText('{tmp_path}')
+$mail.Send()
+"""
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip()[:200])
+    finally:
+        if tmp_path is not None:
+            os.remove(tmp_path)
+
+
 def send_email(subject: str, html: str) -> None:
     """Send one HTML email via Gmail SMTP. Raises on failure — callers decide
     whether that's fatal (CLI) or a banner (dashboard).
@@ -283,7 +330,18 @@ def send_email(subject: str, html: str) -> None:
     465 succeeded when 587 failed in back-to-back tests, and this pattern
     reproduced with raw sockets (no smtplib involved), so it's network-level
     flakiness, not an smtplib/library bug. Trying both gives each send the
-    best chance of getting through a transient block on one path."""
+    best chance of getting through a transient block on one path.
+
+    On win32, if both SMTP attempts fail, falls back to a local Outlook COM
+    send (see _send_via_outlook) — the office network this laptop runs on
+    is 443-only and blocks SMTP entirely, so Outlook's own connection is the
+    only path out.
+
+    On any platform, if SMTP fails AND the Gmail API is configured (see
+    gmail_api.py / scripts/setup_gmail_oauth.py), falls back to sending
+    over HTTPS via the Gmail API — the same 443-only-network problem can
+    hit macOS too (confirmed independently by raw-socket testing), and
+    macOS has no Outlook COM to fall back to."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"AI Briefing <{config.GMAIL_ADDRESS}>"
@@ -310,7 +368,32 @@ def send_email(subject: str, html: str) -> None:
         # network blip unless the 465 error is visible somewhere.
         print(f"SMTP:465 failed ({e}), falling back to 587", flush=True)
 
-    _with_retry(_via_587, max_attempts=2, label="SMTP:587")
+    try:
+        _with_retry(_via_587, max_attempts=2, label="SMTP:587")
+        return
+    except Exception as e:
+        smtp_error = e
+        if sys.platform == "win32":
+            print(f"SMTP:587 failed ({e}), falling back to Outlook COM", flush=True)
+        else:
+            print(f"SMTP:587 failed ({e}), falling back to Gmail API (if configured)", flush=True)
+
+    if sys.platform == "win32":
+        _send_via_outlook(subject, html)
+        print("sent via Outlook COM fallback", flush=True)
+        return
+
+    from . import gmail_api
+
+    if not gmail_api.is_configured():
+        # Preserve the original SMTP exception type/traceback — callers
+        # (and tests) match on smtplib.SMTPException, not a generic wrapper.
+        # The "how to fix" guidance still reaches the log via the print
+        # above; re-raising here just re-throws what SMTP already raised.
+        raise smtp_error
+
+    gmail_api.send_email_via_api(subject, html)
+    print("sent via Gmail API fallback (HTTPS/443)", flush=True)
 
 
 def already_sent_today(subject_contains: str) -> bool:
@@ -332,7 +415,18 @@ def already_sent_today(subject_contains: str) -> bool:
             ids = data[0].split() if data and data[0] else []
             return len(ids) > 0
 
-    return _with_retry(_check, max_attempts=3, label="IMAP check")
+    try:
+        return _with_retry(_check, max_attempts=3, label="IMAP check")
+    except Exception as e:
+        from . import gmail_api
+
+        if not gmail_api.is_configured():
+            # Fail closed: if we can't verify "already sent", don't send —
+            # a caller catching this exception should treat it as "skip",
+            # not "assume not sent and risk a duplicate".
+            raise
+        print(f"IMAP check failed ({e}), falling back to Gmail API (HTTPS/443)", flush=True)
+        return gmail_api.already_sent_today_via_api(subject_contains)
 
 
 def send_two_part_briefing(part1_html: str, part2_html: str, date_str: str) -> dict:

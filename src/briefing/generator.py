@@ -12,6 +12,9 @@ findings > news/HN > GitHub/arXiv > YouTube transcripts.
 import json
 import os
 import re
+import shutil
+import subprocess
+import threading
 from datetime import datetime
 
 from . import config, db, sender
@@ -278,12 +281,52 @@ def _gemini_call(system: str, user: str, max_attempts: int) -> str:
     return _call_with_retry(request_factory, extract, "Gemini direct", max_attempts)
 
 
+# The 6 parallel section calls (ThreadPoolExecutor, call_gemini) must not
+# spawn 6 concurrent `claude -p` processes — cap at 2 in flight.
+_CLAUDE_CLI_SEMAPHORE = threading.Semaphore(2)
+_claude_cli_missing_logged = False
+
+
+def _claude_cli_available() -> bool:
+    """shutil.which() guard, logged once (not per call) when absent."""
+    global _claude_cli_missing_logged
+    if shutil.which("claude"):
+        return True
+    if not _claude_cli_missing_logged:
+        log("  Claude CLI not found on PATH — skipping this tier")
+        _claude_cli_missing_logged = True
+    return False
+
+
+def _claude_cli_call(system: str, user: str) -> str:
+    """Call Claude via `claude -p` CLI, piping prompt via stdin — port of
+    legacy/ai_briefing.py:_claude_cli_call. Uses the existing Claude
+    subscription rather than a metered API, so it's the safety net once the
+    API tiers hit quota/credit walls."""
+    prompt = f"{system}\n\n{user}"
+    with _CLAUDE_CLI_SEMAPHORE:
+        result = subprocess.run(
+            ["claude", "-p", "--model", config.CLAUDE_CLI_MODEL, "-"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300,
+        )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude -p exited {result.returncode}: {result.stderr.strip()}")
+    if not result.stdout.strip():
+        raise RuntimeError("claude -p returned empty output")
+    return result.stdout.strip()
+
+
 def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
-    """Provider chain: maxplus first (if MAXPLUS_API_KEY is set), falling
-    back to the direct Gemini API (if GEMINI_API_KEY is set) once maxplus
-    exhausts its retries or fails fast on a deterministic 4xx (e.g. the
-    maxplus pool's HTTP 402 insufficient_credit on large calls). Raises the
-    last provider's error if every configured provider fails."""
+    """Provider chain: maxplus first (if MAXPLUS_API_KEY is set), then the
+    direct Gemini API (if GEMINI_API_KEY is set), then the local Claude CLI
+    (if enabled and installed) as the final safety net. API tiers come
+    first since they're faster and don't consume the interactive Claude
+    session pool. Each tier logs its failure and falls through; raises the
+    last provider's error if every configured tier fails."""
     last_error = None
     if config.MAXPLUS_API_KEY:
         try:
@@ -297,6 +340,12 @@ def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
         except Exception as e:
             last_error = e
             log(f"  Gemini direct failed: {e}")
+    if config.CLAUDE_CLI_ENABLED and _claude_cli_available():
+        try:
+            return _claude_cli_call(system, user)
+        except Exception as e:
+            last_error = e
+            log(f"  Claude CLI failed: {e}")
     if last_error is None:
         raise RuntimeError("No AI provider configured: set MAXPLUS_API_KEY or GEMINI_API_KEY")
     raise last_error
@@ -450,10 +499,17 @@ def generate(conn, research_findings: str = "") -> dict:
     part2_html = sender.markdown_to_html(part2_md, date_str, title="Daily AI Briefing — Part 2")
 
     os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
-    archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{datetime.now().strftime('%H%M')}.md")
+    hhmm = datetime.now().strftime("%H%M")
+    archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}.md")
     with open(archive_path, "w") as f:
         f.write(markdown)
-    log(f"Archived to {archive_path}")
+    part1_archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}_part1_news.md")
+    with open(part1_archive_path, "w") as f:
+        f.write(part1_md)
+    part2_archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}_part2_technical.md")
+    with open(part2_archive_path, "w") as f:
+        f.write(part2_md)
+    log(f"Archived to {archive_path}, {part1_archive_path}, {part2_archive_path}")
 
     return {
         "markdown": markdown,

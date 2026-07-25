@@ -19,7 +19,16 @@ LOG_PATH = os.path.join(REPO_ROOT, "briefing.log")
 
 
 def _load_env():
-    """Load key=value pairs from .env next to the repo root (no external deps)."""
+    """Load key=value pairs from .env next to the repo root (no external deps).
+
+    Overrides ambient shell exports for the specific keys this project
+    reads, rather than setdefault()'ing around them — several of these
+    names (MAXPLUS_API_KEY in particular) are also used by unrelated
+    tooling (e.g. Claude Code's own shell config) and can be exported
+    globally in an interactive terminal. Without this, commenting out a
+    key in .env to intentionally disable a provider silently does nothing
+    if a same-named var happens to be exported elsewhere — .env is the
+    explicit, per-project source of truth and must win."""
     if os.path.exists(ENV_PATH):
         with open(ENV_PATH) as f:
             for line in f:
@@ -33,7 +42,7 @@ def _load_env():
                     value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
                     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                         value = value[1:-1]
-                    os.environ.setdefault(key.strip(), value)
+                    os.environ[key.strip()] = value
 
 
 _load_env()
@@ -45,7 +54,14 @@ MAXPLUS_API_KEY = os.environ.get("MAXPLUS_API_KEY", "")
 # require a code edit.
 MAXPLUS_MODEL = os.environ.get("MAXPLUS_MODEL", "gpt-5.5")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+# Safety-net provider tier: shells out to the `claude` CLI (uses the existing
+# subscription, no separate API quota) when both maxplus and Gemini fail.
+# Enabled by default so a quota wall doesn't need a code change to route
+# around; "sonnet" not "opus" since this runs unattended and per-call cost
+# should stay low.
+CLAUDE_CLI_ENABLED = os.environ.get("CLAUDE_CLI_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+CLAUDE_CLI_MODEL = os.environ.get("CLAUDE_CLI_MODEL", "sonnet")
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
