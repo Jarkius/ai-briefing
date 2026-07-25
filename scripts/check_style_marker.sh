@@ -37,7 +37,9 @@ fi
 # generate() always archives the full markdown (regardless of --dry-run)
 # and logs its path — check that file, not the dry-run stdout print, which
 # truncates each HTML part to 1000 chars and could cut the marker off.
-ARCHIVE_PATH="$(echo "$OUTPUT" | sed -n 's/.*Archived to \(.*\)$/\1/p' | tail -1)"
+# The log line lists three comma-separated paths (full, part1, part2) —
+# take the first (the full markdown).
+ARCHIVE_PATH="$(echo "$OUTPUT" | sed -n 's/.*Archived to \([^,]*\).*/\1/p' | tail -1)"
 
 if [ -z "$ARCHIVE_PATH" ] || [ ! -f "$ARCHIVE_PATH" ]; then
     echo "FAIL: could not find archived markdown path in run.py output." >&2

@@ -19,9 +19,9 @@ Code-complete; acceptance bar not fully met.
 ### Pending
 - [x] ~~Remaining risk for 5am email: Gmail SMTP/IMAP TLS-blocked on this network~~ **RESOLVED 2026-07-25**: Gmail API over 443 is now the PRIMARY send+pre-check transport (SMTP/IMAP demoted to fallback). OAuth done on this Mac as sender `jarkius.ai@gmail.com`; real sends verified through the API path. Note: Windows machine still needs its own OAuth token (data/ is per-machine) — until then it uses SMTP→Outlook COM as before.
 - [ ] Gemini free-tier key (in .env) hit 429 daily/rate quota during 2026-07-24 testing — quota resets midnight PT (=2pm Bangkok); 5am run should have fresh quota. maxplus commented out in .env (pool no longer serves gemini models; would need MAXPLUS_MODEL=gpt-5.5 + credit top-up to re-enable).
-- [ ] AC5: offline soft-fail run (Wi-Fi off mid-collect → still exits 0, sends from DB)
-- [ ] AC7: run `scripts/check_style_marker.sh` (harness written, unexecuted — blocked on provider 402)
-- [ ] AC8: wall-clock measurement (<5 min no-video, <15 min with one transcription) — blocked on provider 402
+- [x] AC5 **PASSED 2026-07-25 20:26**: Wi-Fi killed 8s into Collect (`networksetup -setairportpower en0 off`, 25s outage) — all 26 sources logged per-source DNS soft-fails (no traceback), pipeline continued, generated from 48 DB items, Send returned `{'part1': 'already_sent', 'part2': 'already_sent'}` (correct dedup — 4 sends already that day), **exit 0**. Wi-Fi restored via trap.
+- [x] AC7 **PASSED 2026-07-25 20:25**: `scripts/check_style_marker.sh` exit 0 — STYLE-MARKER-42 in `archives/briefing_2026-07-25_2025.md`, newsletter_style.md restored byte-identical. (Harness itself had a bug: "Archived to" log line now lists 3 comma-separated paths; sed fixed to take the first.)
+- [x] AC8 **MET (no-video bound)**: two full scheduled launchd runs measured via briefing.log phase timestamps — 19:05:06→19:06:19 (73s) and 20:13:02→20:14:03 (61s), both ≪ 5-min bar. With-one-transcription bound (<15 min) untested — no new YouTube video available on test days; bound remains theoretical.
 - [ ] QA gate report → PR `feat/mcp-collector` → `main`
 - [ ] Follow-up: repoint `setup.sh` fork SHA → upstream tag when PR #8 merges (check monthly)
 
@@ -51,6 +51,12 @@ Not started beyond scaffolding — `src/panel/` has only empty `__init__.py`, `s
 - [ ] Out-of-scope tracked elsewhere: 6am launchd DNS/proxy issue (`FIX_EMAIL_DELIVERY.md`)
 
 ## Work log (newest first — append a timestamped entry per session)
+
+### 2026-07-25 20:40 (acceptance closure: AC5/AC7/AC8 + feed hygiene)
+- **AC7 PASSED**: `scripts/check_style_marker.sh` exit 0 (marker in archive, style file restored). Fixed harness bug first: archive log line now has 3 comma-separated paths; sed took the whole list as one path.
+- **AC5 PASSED**: Wi-Fi killed 8s into Collect (25s outage) → 26 per-source DNS soft-fails, no traceback, generated from DB (48 items), send correctly deduped (`already_sent`), exit 0. Wi-Fi restored via trap.
+- **AC8 MET** (no-video): 73s and 61s full scheduled runs vs 5-min bar (briefing.log 19:05/20:13). With-transcription bound untested (no new video).
+- **Feed hygiene**: check_feeds errors 8 → 1 (only Reddit r/ML 429, transient). Fixed URLs in subscriptions.json + live DB rows (feeds.db snapshot: data/feeds.db.bak-2026-07-25): PyTorch → pytorch.org/blog/feed.xml (10 items), LangChain → langchain.com/blog/rss.xml (100), Ahead of AI → magazine.sebastianraschka.com/feed (20), TLDR AI → tldr.tech/api/rss/ai (20). Retired (archived to subscriptions_retired.json, nothing deleted): AI News + MarkTechPost (WAF 403s urllib regardless of UA), The Batch (no working RSS endpoint found).
 
 ### 2026-07-25 20:13 (multi-recipient + full scheduled test through API path)
 - **Second recipient added**: `RECIPIENT_EMAIL=juckrit@gmail.com,jsanitareephon@deloitte.com` (.env, comma-separated). Config now parses `RECIPIENT_EMAILS` list; all three transports updated (Gmail API + SMTP `sendmail` gets the list — a joined string would silently deliver only to the first; Outlook COM gets `;`-joined To).
