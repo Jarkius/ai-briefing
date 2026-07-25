@@ -9,6 +9,12 @@ re-dated reconstruction.
 
 LAST_GENERATION: dict | None = None  # generate()'s return dict, verbatim
 
+# Findings text from the last completed dashboard research job. The next
+# dashboard Regenerate folds this into generate(research_findings=...) —
+# same as run.py's research→generate handoff — then clears it so a later
+# regenerate doesn't repeat a stale "Requested Research" section.
+LAST_RESEARCH_FINDINGS: str = ""
+
 
 def set_generation(result: dict) -> None:
     global LAST_GENERATION
@@ -17,3 +23,14 @@ def set_generation(result: dict) -> None:
 
 def get_generation() -> dict | None:
     return LAST_GENERATION
+
+
+def set_research_findings(text: str) -> None:
+    global LAST_RESEARCH_FINDINGS
+    LAST_RESEARCH_FINDINGS = text
+
+
+def pop_research_findings() -> str:
+    global LAST_RESEARCH_FINDINGS
+    text, LAST_RESEARCH_FINDINGS = LAST_RESEARCH_FINDINGS, ""
+    return text

@@ -51,12 +51,15 @@ async def preview(request: Request):
 
 def _regenerate_job() -> dict:
     """Blocking: run generate() against current DB state, tracked in a
-    dashboard-source runs row. Runs on a worker thread via submit_sync."""
+    dashboard-source runs row. Runs on a worker thread via submit_sync.
+    Folds in any findings from a completed dashboard research job (the
+    panel's equivalent of run.py's research→generate handoff)."""
+    findings = state.pop_research_findings()
     conn = db.connect()
     try:
         run_id = db.insert_run(conn, source="dashboard", started_at=datetime.now().isoformat())
         try:
-            result = generator.generate(conn, research_findings="")
+            result = generator.generate(conn, research_findings=findings)
             db.update_run(conn, run_id, generate_status="ok")
         except Exception as e:
             db.update_run(conn, run_id, generate_status="error", error_text=str(e)[:500])
@@ -130,6 +133,14 @@ def _job_fragment(job_id: str) -> str:
             '<div class="banner banner-ok" hx-get="/preview" hx-trigger="load delay:1s" '
             'hx-target="body" hx-swap="innerHTML">✓ regenerated — refreshing preview…</div>'
         )
+    if job.name == "research" and isinstance(job.result, str):
+        findings = html_lib.escape(job.result)
+        return (
+            '<div class="banner banner-ok">✓ research done — findings below will be '
+            'folded into the next <a href="/preview">Regenerate</a> as a '
+            '"Requested Research" section.</div>'
+            f'<pre class="findings">{findings}</pre>'
+        )
     return f'<div class="banner banner-ok">✓ {html_lib.escape(job.name)} done</div>'
 
 
@@ -164,6 +175,9 @@ async def _research_job(phase) -> str:
     with mcp_client.mcp_lock(retry_seconds=0):
         findings, count = await researcher.run_pending_async(phase_cb=phase)
     if count:
+        # Stash for the next dashboard Regenerate → "Requested Research"
+        # section in the newsletter, mirroring run.py's phase handoff.
+        state.set_research_findings(findings)
         err = _pathspec_commit(
             "dashboard: research request completed", config.RESEARCH_REQUESTS_PATH
         )

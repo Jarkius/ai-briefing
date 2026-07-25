@@ -93,3 +93,45 @@ def test_research_job_commits_only_when_requests_processed():
 
     commit.assert_called_once()
     assert result == "findings!"
+
+
+def test_research_done_fragment_shows_findings():
+    j = jobs.Job(name="research", status="done")
+    j.result = "### my request\n\nInteresting finding <b>escaped</b>"
+    jobs.JOBS["donejob"] = j
+    r = client.get("/jobs/donejob")
+    assert "Interesting finding" in r.text
+    assert "&lt;b&gt;escaped&lt;/b&gt;" in r.text  # findings are HTML-escaped
+    assert "Requested Research" in r.text
+    assert "every 2s" not in r.text  # terminal — no more polling
+
+
+def test_research_findings_flow_into_next_regenerate():
+    import asyncio
+
+    from panel import state
+    from panel.app import _research_job
+
+    class FakeLock:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *a):
+            return None
+
+    with patch("panel.app.mcp_client.mcp_lock", return_value=FakeLock()), \
+         patch("panel.app.researcher.run_pending_async", new=AsyncMock(return_value=("F1 findings", 1))), \
+         patch("panel.app._pathspec_commit", return_value=None):
+        asyncio.run(_research_job(lambda t: None))
+
+    # regenerate must consume them (and only once)
+    from panel.app import _regenerate_job
+    with patch("panel.app.db.connect") as conn_mock, \
+         patch("panel.app.db.insert_run", return_value=1), \
+         patch("panel.app.db.update_run"), \
+         patch("panel.app.generator.generate", return_value={"ok": True}) as gen:
+        conn_mock.return_value.close = lambda: None
+        _regenerate_job()
+    assert gen.call_args.kwargs["research_findings"] == "F1 findings"
+    assert state.LAST_RESEARCH_FINDINGS == ""  # consumed, not repeated
+    state.LAST_GENERATION = None
