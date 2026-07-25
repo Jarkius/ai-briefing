@@ -88,7 +88,7 @@ def mcp_lock(retry_seconds: float = 0, poll_interval: float = 5):
     try:
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _try_lock(fd)
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
@@ -99,7 +99,7 @@ def mcp_lock(retry_seconds: float = 0, poll_interval: float = 5):
         yield
     finally:
         with contextlib.suppress(OSError):
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            _unlock(fd)
         os.close(fd)
 
 
@@ -109,8 +109,8 @@ def is_locked() -> bool:
     os.makedirs(config.DATA_DIR, exist_ok=True)
     fd = os.open(config.MCP_LOCK_PATH, os.O_CREAT | os.O_RDWR)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        _try_lock(fd)
+        _unlock(fd)
         return False
     except BlockingIOError:
         return True

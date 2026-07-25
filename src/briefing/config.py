@@ -45,35 +45,57 @@ def _load_env():
                     os.environ[key.strip()] = value
 
 
+def _bind():
+    """(Re)bind the module-level config constants from os.environ. Split out
+    of module top-level so reload() can re-run it after a .env edit — the
+    control panel's /settings route rewrites .env in the running process,
+    where 'a fresh run picks it up' doesn't apply."""
+    global MAXPLUS_API_KEY, MAXPLUS_MODEL, GEMINI_API_KEY, GEMINI_MODEL
+    global CLAUDE_CLI_ENABLED, CLAUDE_CLI_MODEL
+    global GMAIL_ADDRESS, GMAIL_APP_PASSWORD, RECIPIENT_EMAIL, RECIPIENT_EMAILS
+    global REQUIRED_ENV
+
+    MAXPLUS_API_KEY = os.environ.get("MAXPLUS_API_KEY", "")
+    # "gemini-3.5-flash" (the original hardcoded default) is no longer served by
+    # the maxplus pool as of 2026-07-23 — confirmed via a live 400 response
+    # listing available models. Configurable so a future pool change doesn't
+    # require a code edit.
+    MAXPLUS_MODEL = os.environ.get("MAXPLUS_MODEL", "gpt-5.5")
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+    # Safety-net provider tier: shells out to the `claude` CLI (uses the existing
+    # subscription, no separate API quota) when both maxplus and Gemini fail.
+    # Enabled by default so a quota wall doesn't need a code change to route
+    # around; "sonnet" not "opus" since this runs unattended and per-call cost
+    # should stay low.
+    CLAUDE_CLI_ENABLED = os.environ.get("CLAUDE_CLI_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+    CLAUDE_CLI_MODEL = os.environ.get("CLAUDE_CLI_MODEL", "sonnet")
+    GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
+    GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+    RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
+    # Comma-separated in .env; every send path needs the parsed list (SMTP's
+    # to_addrs and Outlook's To take all recipients, a bare comma string would
+    # silently deliver to only the first).
+    RECIPIENT_EMAILS = [e.strip() for e in RECIPIENT_EMAIL.split(",") if e.strip()]
+
+    REQUIRED_ENV = {
+        "GMAIL_ADDRESS": GMAIL_ADDRESS,
+        "GMAIL_APP_PASSWORD": GMAIL_APP_PASSWORD,
+    }
+
+
 _load_env()
+_bind()
 
-MAXPLUS_API_KEY = os.environ.get("MAXPLUS_API_KEY", "")
-# "gemini-3.5-flash" (the original hardcoded default) is no longer served by
-# the maxplus pool as of 2026-07-23 — confirmed via a live 400 response
-# listing available models. Configurable so a future pool change doesn't
-# require a code edit.
-MAXPLUS_MODEL = os.environ.get("MAXPLUS_MODEL", "gpt-5.5")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-# Safety-net provider tier: shells out to the `claude` CLI (uses the existing
-# subscription, no separate API quota) when both maxplus and Gemini fail.
-# Enabled by default so a quota wall doesn't need a code change to route
-# around; "sonnet" not "opus" since this runs unattended and per-call cost
-# should stay low.
-CLAUDE_CLI_ENABLED = os.environ.get("CLAUDE_CLI_ENABLED", "1").strip().lower() not in ("0", "false", "no")
-CLAUDE_CLI_MODEL = os.environ.get("CLAUDE_CLI_MODEL", "sonnet")
-GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
-RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
-# Comma-separated in .env; every send path needs the parsed list (SMTP's
-# to_addrs and Outlook's To take all recipients, a bare comma string would
-# silently deliver to only the first).
-RECIPIENT_EMAILS = [e.strip() for e in RECIPIENT_EMAIL.split(",") if e.strip()]
 
-REQUIRED_ENV = {
-    "GMAIL_ADDRESS": GMAIL_ADDRESS,
-    "GMAIL_APP_PASSWORD": GMAIL_APP_PASSWORD,
-}
+def reload():
+    """Re-read .env and rebind all module constants. For long-lived processes
+    (the control panel) after a settings edit; CLI runs never need it.
+
+    Note: callers using `from briefing.config import X` hold stale snapshots —
+    always access via `config.X` (the existing codebase already does)."""
+    _load_env()
+    _bind()
 
 
 def require_env():

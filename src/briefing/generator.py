@@ -502,7 +502,9 @@ def generate(conn, research_findings: str = "") -> dict:
     part2_html = sender.markdown_to_html(part2_md, date_str, title="Daily AI Briefing — Part 2")
 
     os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
-    hhmm = datetime.now().strftime("%H%M")
+    # Seconds included: a cron generate and a dashboard regenerate landing in
+    # the same minute must not overwrite each other's archive.
+    hhmm = datetime.now().strftime("%H%M%S")
     archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}.md")
     with open(archive_path, "w") as f:
         f.write(markdown)
