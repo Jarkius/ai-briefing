@@ -21,9 +21,8 @@
   <iframe class="mail-frame" srcdoc="{{ gen.part2_html | e }}" sandbox=""></iframe>
 </section>
 {% else %}
-<p class="muted">No generation in this server session yet. Preview shows the exact
-in-memory HTML that send uses — archives store only markdown, so a re-render on a
-later day would carry the wrong date. Click <strong>Regenerate</strong> to render
-the current DB state.</p>
+<p class="muted">No generation in this server session yet — this tab shows the exact
+in-memory HTML that send uses. Click <strong>Regenerate</strong> to render the current
+DB state, or browse past newsletters in the <a href="/archive">Archive</a> tab.</p>
 {% endif %}
 {% endblock %}

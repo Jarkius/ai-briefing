@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Archive</h1>
+{% if not entries %}
+<p class="muted">No archived briefings yet — they appear here after each generate (scheduled or manual).</p>
+{% else %}
+<div class="archive-layout">
+  <nav class="archive-list">
+    {% for e in entries %}
+    <a href="/archive?view={{ e.file }}"
+       class="{{ 'selected' if selected and e.file == selected.file else '' }}">
+      <span class="a-date">{{ e.date }}</span>
+      <span class="a-time mono">{{ e.time }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+  <div class="archive-view">
+    {% if parts %}
+    <p class="muted">{{ parts.date_str }} — re-rendered from archived markdown with the archive's own date.</p>
+    <section class="letter">
+      <h2>Part 1 · News &amp; Learning</h2>
+      <iframe class="mail-frame" srcdoc="{{ parts.part1 | e }}" sandbox=""></iframe>
+    </section>
+    <section class="letter">
+      <h2>Part 2 · Technical &amp; Community</h2>
+      <iframe class="mail-frame" srcdoc="{{ parts.part2 | e }}" sandbox=""></iframe>
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -11,7 +11,7 @@
 <header class="topbar">
   <span class="brand">AI&nbsp;Briefing</span>
   <nav>
-    {% for tab in ["preview", "research", "style", "sources", "schedule", "settings", "logs"] %}
+    {% for tab in ["preview", "archive", "research", "style", "sources", "schedule", "settings", "logs"] %}
     <a href="/{{ tab }}" class="{{ 'active' if active == tab else '' }}">{{ tab }}</a>
     {% endfor %}
   </nav>

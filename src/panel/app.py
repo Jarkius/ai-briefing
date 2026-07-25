@@ -365,6 +365,65 @@ async def settings_save(request: Request):
     return HTMLResponse(_banner("ok", "settings saved — applied to this server immediately (.env stays gitignored)"))
 
 
+# ---- archive -------------------------------------------------------------------
+
+import re as _re
+
+# briefing_2026-07-25_2028.md or briefing_2026-07-25_232539.md — the full
+# document only; the _part1/_part2 siblings are derivable via split_two_parts.
+_ARCHIVE_RE = _re.compile(r"^briefing_(\d{4}-\d{2}-\d{2})_(\d{4}|\d{6})\.md$")
+
+
+def _list_archives() -> list[dict]:
+    """Newest-first list of full-briefing archives with display labels."""
+    entries = []
+    if os.path.isdir(config.ARCHIVE_DIR):
+        for fname in os.listdir(config.ARCHIVE_DIR):
+            m = _ARCHIVE_RE.match(fname)
+            if not m:
+                continue
+            date_part, time_part = m.groups()
+            hh, mm = time_part[:2], time_part[2:4]
+            entries.append({"file": fname, "date": date_part, "time": f"{hh}:{mm}"})
+    entries.sort(key=lambda e: e["file"], reverse=True)
+    return entries
+
+
+def _archive_date_str(date_part: str) -> str:
+    """Human date for the masthead, from the ARCHIVE's date — not today's.
+    Same %-d-free construction as generator.generate (Windows-safe)."""
+    d = datetime.strptime(date_part, "%Y-%m-%d")
+    return f"{d.strftime('%A, %B')} {d.day}, {d.year}"
+
+
+@app.get("/archive", response_class=HTMLResponse)
+async def archive_page(request: Request, view: str = ""):
+    entries = _list_archives()
+    selected = None
+    parts = None
+    if view:
+        # basename() strips any path tricks; then the entry must match a real
+        # listed archive — /archive can never read outside ARCHIVE_DIR.
+        view = os.path.basename(view)
+        selected = next((e for e in entries if e["file"] == view), None)
+    if selected is None and entries:
+        selected = entries[0]
+    if selected:
+        with open(os.path.join(config.ARCHIVE_DIR, selected["file"])) as f:
+            markdown = f.read()
+        date_str = _archive_date_str(selected["date"])
+        p1_md, p2_md = sender.split_two_parts(markdown)
+        parts = {
+            "part1": sender.markdown_to_html(p1_md, date_str, title="Daily AI Briefing — Part 1"),
+            "part2": sender.markdown_to_html(p2_md, date_str, title="Daily AI Briefing — Part 2"),
+            "date_str": date_str,
+        }
+    return templates.TemplateResponse(
+        request, "archive.html",
+        {"active": "archive", "entries": entries, "selected": selected, "parts": parts},
+    )
+
+
 # ---- logs ----------------------------------------------------------------------
 
 PHASES = ["collect_status", "research_status", "generate_status", "send_status"]
