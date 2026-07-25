@@ -45,11 +45,19 @@ def _get_credentials():
     creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        with open(TOKEN_PATH, "w") as f:
+        # Atomic replace, not truncate+write: a cron send and a dashboard
+        # send can both hit refresh near expiry, and an interleaved write
+        # would corrupt the token file — killing the PRIMARY transport on
+        # every later run until a human re-runs the OAuth setup. os.replace
+        # is atomic on POSIX and Windows; worst case now is one refresh
+        # harmlessly overwriting the other's equally-valid token.
+        tmp_path = TOKEN_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
             f.write(creds.to_json())
         # gmail.modify scope = full mailbox read+send; default umask leaves
-        # the rewritten token world-readable. Keep it owner-only, like .env.
-        os.chmod(TOKEN_PATH, 0o600)
+        # the token world-readable. Owner-only, like .env.
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, TOKEN_PATH)
     return creds
 
 

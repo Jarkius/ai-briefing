@@ -73,3 +73,20 @@ def test_already_sent_today_via_api_false_when_no_messages():
     fake_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {}
     with patch.object(gmail_api, "_service", return_value=fake_service):
         assert gmail_api.already_sent_today_via_api("AI Briefing Part 1") is False
+
+
+def test_refresh_write_is_atomic_and_owner_only(tmp_path):
+    token_path = tmp_path / "token.json"
+    token_path.write_text("{}")
+
+    fake_creds = MagicMock(expired=True, refresh_token="rt")
+    fake_creds.to_json.return_value = '{"refreshed": true}'
+
+    with patch.object(gmail_api, "TOKEN_PATH", str(token_path)), \
+         patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=fake_creds):
+        gmail_api._get_credentials()
+
+    # temp file must be gone (os.replace'd into place), token owner-only
+    assert not (tmp_path / "token.json.tmp").exists()
+    assert oct(os.stat(token_path).st_mode & 0o777) == "0o600"
+    assert token_path.read_text() == '{"refreshed": true}'

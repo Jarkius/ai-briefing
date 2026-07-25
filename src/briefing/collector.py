@@ -41,6 +41,13 @@ async def _reconcile(session, conn) -> int:
         if source_type not in config.KNOWN_SOURCE_TYPES:
             log(f"  SKIP invalid source_type '{source_type}' for '{identifier}' in subscriptions.json")
             continue
+        if not name:
+            # The (source_type, name) reconcile key collapses for entries
+            # without a name — after the first ('news', '') subscribes, every
+            # later nameless news entry would look already-present and be
+            # silently skipped forever. Fail loudly instead.
+            log(f"  SKIP '{identifier}' — missing required 'name' in subscriptions.json")
+            continue
         if (source_type, name) in existing:
             continue
         result = await session.call_tool("subscribe", {
