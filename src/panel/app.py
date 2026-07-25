@@ -211,6 +211,160 @@ async def research_run(text: str = Form("")):
     return HTMLResponse(_job_fragment(job_id))
 
 
+# ---- style -------------------------------------------------------------------
+
+
+def _banner(kind: str, text: str) -> str:
+    return f'<div class="banner banner-{kind}">{html_lib.escape(text)}</div>'
+
+
+@app.get("/style", response_class=HTMLResponse)
+async def style_page(request: Request):
+    return templates.TemplateResponse(
+        request, "style.html", {"active": "style", "style_text": config.load_style()}
+    )
+
+
+@app.post("/style", response_class=HTMLResponse)
+async def style_save(style_text: str = Form("")):
+    with open(config.STYLE_PATH, "w") as f:
+        f.write(style_text)
+    err = _pathspec_commit("dashboard: update newsletter style", config.STYLE_PATH)
+    if err:
+        return HTMLResponse(_banner("warn", f"saved, but git commit failed: {err}"))
+    return HTMLResponse(_banner("ok", "style saved + committed (push stays manual)"))
+
+
+# ---- sources -------------------------------------------------------------------
+
+
+@app.get("/sources", response_class=HTMLResponse)
+async def sources_page(request: Request):
+    return templates.TemplateResponse(
+        request, "sources.html",
+        {"active": "sources", "subs": config.load_subscriptions(),
+         "types": sorted(config.KNOWN_SOURCE_TYPES)},
+    )
+
+
+@app.post("/sources", response_class=HTMLResponse)
+async def sources_add(
+    source_type: str = Form(...), identifier: str = Form(...), name: str = Form(...)
+):
+    source_type, identifier, name = source_type.strip(), identifier.strip(), name.strip()
+    if source_type not in config.KNOWN_SOURCE_TYPES:
+        return HTMLResponse(_banner("err", f"unknown source_type '{source_type}'"))
+    if not identifier or not name:
+        # collector's reconcile key is (type, name) — a nameless entry would
+        # be silently skipped forever, so the form requires it up front.
+        return HTMLResponse(_banner("err", "identifier and name are both required"))
+    subs = config.load_subscriptions()
+    if any(s.get("name") == name and s["source_type"] == source_type for s in subs):
+        return HTMLResponse(_banner("warn", f"'{name}' already subscribed"))
+    subs.append({"source_type": source_type, "identifier": identifier, "name": name})
+    config.save_subscriptions(subs)
+    err = _pathspec_commit("dashboard: add source", config.SUBSCRIPTIONS_PATH)
+    if err:
+        return HTMLResponse(_banner("warn", f"saved, but git commit failed: {err}"))
+    return HTMLResponse(_banner("ok", f"added '{name}' — subscribes on the next collect run"))
+
+
+# ---- schedule ------------------------------------------------------------------
+
+PLIST_PATH = os.path.expanduser("~/Library/LaunchAgents/com.user.ai-briefing.plist")
+
+
+@app.get("/schedule", response_class=HTMLResponse)
+async def schedule_page(request: Request):
+    import plistlib
+
+    hour, minute, err = 5, 0, None
+    if sys.platform == "darwin" and os.path.exists(PLIST_PATH):
+        with open(PLIST_PATH, "rb") as f:
+            cal = plistlib.load(f).get("StartCalendarInterval", {})
+        hour, minute = cal.get("Hour", 5), cal.get("Minute", 0)
+    elif sys.platform != "darwin":
+        err = "schedule editing is macOS/launchd-only on this machine (Windows uses Task Scheduler)"
+    return templates.TemplateResponse(
+        request, "schedule.html",
+        {"active": "schedule", "hour": hour, "minute": minute, "err": err},
+    )
+
+
+@app.post("/schedule", response_class=HTMLResponse)
+async def schedule_save(hour: int = Form(...), minute: int = Form(...)):
+    import plistlib
+
+    if sys.platform != "darwin":
+        return HTMLResponse(_banner("err", "launchd schedule editing only works on macOS"))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return HTMLResponse(_banner("err", "hour must be 0-23, minute 0-59"))
+    if not os.path.exists(PLIST_PATH):
+        return HTMLResponse(_banner("err", f"plist not found: {PLIST_PATH}"))
+    # plistlib round-trip, never string templating (plan step 14).
+    with open(PLIST_PATH, "rb") as f:
+        plist = plistlib.load(f)
+    plist["StartCalendarInterval"] = {"Hour": hour, "Minute": minute}
+    with open(PLIST_PATH, "wb") as f:
+        plistlib.dump(plist, f)
+    for action in (["unload"], ["load"]):
+        r = subprocess.run(["launchctl", *action, PLIST_PATH],
+                           capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            return HTMLResponse(_banner("err", f"launchctl {action[0]} failed: {r.stderr.strip()[:150]}"))
+    return HTMLResponse(_banner("ok", f"schedule set to {hour:02d}:{minute:02d} and reloaded"))
+
+
+# ---- settings ------------------------------------------------------------------
+
+# Only these keys are exposed/editable — the .env may hold other tooling vars.
+SETTINGS_KEYS = [
+    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "RECIPIENT_EMAIL",
+    "GEMINI_API_KEY", "GEMINI_MODEL", "MAXPLUS_API_KEY", "MAXPLUS_MODEL",
+]
+
+
+def _read_env_lines() -> list[str]:
+    if not os.path.exists(config.ENV_PATH):
+        return []
+    with open(config.ENV_PATH) as f:
+        return f.read().splitlines()
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    values = {k: os.environ.get(k, "") for k in SETTINGS_KEYS}
+    return templates.TemplateResponse(
+        request, "settings.html", {"active": "settings", "values": values}
+    )
+
+
+@app.post("/settings", response_class=HTMLResponse)
+async def settings_save(request: Request):
+    form = await request.form()
+    # Rewrite only known keys in place, preserving unrelated lines/comments.
+    # Values are NEVER logged (plan step 15).
+    lines = _read_env_lines()
+    seen = set()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.partition("=")[0].strip()
+            if key in SETTINGS_KEYS and key in form:
+                lines[i] = f"{key}={form[key]}"
+                seen.add(key)
+    for key in SETTINGS_KEYS:
+        if key in form and key not in seen and str(form[key]).strip():
+            lines.append(f"{key}={form[key]}")
+    with open(config.ENV_PATH, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(config.ENV_PATH, 0o600)
+    # Review M2: without this, the running server keeps stale constants and
+    # the next regenerate/send silently uses the old values.
+    config.reload()
+    return HTMLResponse(_banner("ok", "settings saved — applied to this server immediately (.env stays gitignored)"))
+
+
 @app.get("/status", response_class=HTMLResponse)
 async def status():
     """Header status dot, polled by htmx every 3s.

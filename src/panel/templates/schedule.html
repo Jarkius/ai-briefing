@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Schedule</h1>
+{% if err %}<div class="banner banner-warn">{{ err }}</div>{% endif %}
+<p class="muted">Daily run time (launchd). Saving rewrites the plist via plistlib and reloads the job immediately.</p>
+<form hx-post="/schedule" hx-target="#banner" hx-swap="innerHTML" class="add-source">
+  <input type="number" name="hour" min="0" max="23" value="{{ hour }}" style="width:6rem"> :
+  <input type="number" name="minute" min="0" max="59" value="{{ '%02d' % minute }}" style="width:6rem">
+  <button type="submit">Save + reload launchd</button>
+</form>
+<div id="banner"></div>
+{% endblock %}

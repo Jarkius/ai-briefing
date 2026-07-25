@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Settings</h1>
+<div class="banner banner-warn">These values live in .env (gitignored, never committed). This page is served on
+localhost only — do not port-forward or expose port 8787.</div>
+<form hx-post="/settings" hx-target="#banner" hx-swap="innerHTML" class="settings-form">
+  {% for key, val in values.items() %}
+  <label>{{ key }}
+    <input type="{{ 'password' if 'PASSWORD' in key or 'KEY' in key else 'text' }}"
+           name="{{ key }}" value="{{ val }}" autocomplete="off">
+  </label>
+  {% endfor %}
+  <div class="actions" style="margin-top:0.8rem"><button type="submit">Save</button></div>
+</form>
+<div id="banner"></div>
+{% endblock %}

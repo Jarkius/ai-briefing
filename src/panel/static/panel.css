@@ -70,6 +70,18 @@ textarea, input[type="text"], input[type="password"], input[type="time"], select
   font-family: ui-monospace, Menlo, monospace;
   font-size: 0.85rem;
 }
+.add-source { display: flex; gap: 0.5rem; align-items: center; }
+.add-source select { width: auto; }
+.add-source input { flex: 1; }
+.add-source button { white-space: nowrap; }
+.sources-table { width: 100%; border-collapse: collapse; margin-top: 1.2rem; font-size: 0.9rem; }
+.sources-table th { text-align: left; color: var(--muted); font-weight: 400; font-size: 0.8rem;
+  text-transform: uppercase; letter-spacing: 0.06em; padding: 0.4rem 0.6rem; }
+.sources-table td { padding: 0.4rem 0.6rem; border-top: 1px solid #26252c; }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; color: var(--muted); }
+.settings-form label { display: block; margin: 0.7rem 0; font-size: 0.85rem; color: var(--muted); }
+.settings-form input { margin-top: 0.25rem; }
+
 .requests { list-style: none; padding: 0; }
 .requests li { padding: 0.35rem 0; border-bottom: 1px solid #26252c; font-size: 0.92rem; }
 .requests li.done { color: var(--muted); }
