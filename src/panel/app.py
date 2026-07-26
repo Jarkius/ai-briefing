@@ -243,6 +243,28 @@ async def research_run(text: str = Form("")):
     return HTMLResponse(_job_fragment(job_id))
 
 
+@app.post("/research/paste", response_class=HTMLResponse)
+async def research_paste(title: str = Form(""), content: str = Form(...)):
+    """User already has material (a YouTube summary, an article excerpt,
+    notes) — no fetching needed. It joins the research findings verbatim;
+    the next Regenerate hands it to the model, which rewrites it into the
+    newsletter's own style/sections like any other research."""
+    content = content.strip()
+    if not content:
+        return HTMLResponse(_banner("err", "nothing pasted"))
+    title = title.strip() or "pasted material"
+    block = (
+        f"### {title} (provided by the editor — rewrite into newsletter style, "
+        f"do not quote verbatim)\n\n{content}"
+    )
+    state.add_research_findings(block)
+    return HTMLResponse(_banner(
+        "ok",
+        f"'{title}' filed ({len(content)} chars) — it will be rewritten into the next "
+        "Regenerate as part of Requested Research.",
+    ))
+
+
 # ---- style -------------------------------------------------------------------
 
 

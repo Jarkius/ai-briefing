@@ -30,6 +30,15 @@ def set_research_findings(text: str) -> None:
     LAST_RESEARCH_FINDINGS = text
 
 
+def add_research_findings(text: str) -> None:
+    """Append a findings block (e.g. user-pasted material) without clobbering
+    findings from a completed research job."""
+    global LAST_RESEARCH_FINDINGS
+    LAST_RESEARCH_FINDINGS = (
+        f"{LAST_RESEARCH_FINDINGS}\n\n{text}" if LAST_RESEARCH_FINDINGS else text
+    )
+
+
 def pop_research_findings() -> str:
     global LAST_RESEARCH_FINDINGS
     text, LAST_RESEARCH_FINDINGS = LAST_RESEARCH_FINDINGS, ""

@@ -150,3 +150,33 @@ def test_research_page_links_requests_to_their_archives(tmp_path):
         r = client.get("/research")
     assert "→ in" in r.text
     assert "/archive?view=briefing_2026-07-25_0600.md" in r.text
+
+
+def test_research_paste_files_material_for_next_regenerate():
+    from panel import state
+
+    state.LAST_RESEARCH_FINDINGS = ""
+    r = client.post("/research/paste", data={
+        "title": "Keynote notes",
+        "content": "Speaker said models will be free by 2030.",
+    })
+    assert "filed" in r.text
+    assert "Keynote notes" in state.LAST_RESEARCH_FINDINGS
+    assert "rewrite into newsletter style" in state.LAST_RESEARCH_FINDINGS
+    assert "free by 2030" in state.LAST_RESEARCH_FINDINGS
+    state.LAST_RESEARCH_FINDINGS = ""
+
+
+def test_research_paste_appends_not_clobbers():
+    from panel import state
+
+    state.LAST_RESEARCH_FINDINGS = "### earlier research\n\nexisting findings"
+    client.post("/research/paste", data={"title": "extra", "content": "more notes"})
+    assert "existing findings" in state.LAST_RESEARCH_FINDINGS
+    assert "more notes" in state.LAST_RESEARCH_FINDINGS
+    state.LAST_RESEARCH_FINDINGS = ""
+
+
+def test_research_paste_rejects_empty():
+    r = client.post("/research/paste", data={"title": "x", "content": "   "})
+    assert "nothing pasted" in r.text

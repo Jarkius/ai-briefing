@@ -260,22 +260,29 @@ textarea, input[type="text"], input[type="password"], input[type="time"], select
   background: var(--panel);
   align-self: flex-start;
 }
+.a-datehead {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  padding: 0.55rem 0.8rem 0.25rem;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--panel-raised);
+  position: sticky; top: 0;
+}
 .archive-list a {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas: "date time" "badges badges";
-  align-items: baseline;
-  gap: 0.15rem 0.6rem;
-  padding: 0.55rem 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.8rem 0.45rem 1.1rem;
   color: var(--muted);
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
   border-left: 2px solid transparent;
   font-size: 0.85rem;
 }
-.archive-list a .a-date { grid-area: date; }
-.archive-list a .a-time { grid-area: time; text-align: right; }
-.archive-list a .a-badges { grid-area: badges; display: flex; gap: 0.35rem; align-items: center; }
+.archive-list a .a-time { min-width: 3.2rem; }
+.archive-list a .a-badges { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
 .archive-list a:hover { color: var(--ink); background: rgba(224, 163, 92, 0.05); }
 .archive-list a.selected { color: var(--ink); background: #2a2932; border-left-color: var(--accent); }
 .archive-view { flex: 1; min-width: 0; }
@@ -297,6 +304,14 @@ textarea, input[type="text"], input[type="password"], input[type="time"], select
 .findings { background: #111015; border: 1px solid var(--ok); border-radius: 4px;
   padding: 0.9rem; font-family: var(--mono); font-size: 0.78rem;
   line-height: 1.55; max-height: 420px; overflow-y: auto; white-space: pre-wrap; }
+
+.paste-material { margin-top: 1rem; }
+.paste-material summary {
+  font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.06em;
+  color: var(--muted); cursor: pointer; padding: 0.4rem 0;
+}
+.paste-material summary:hover { color: var(--accent); }
+.paste-material form { margin-top: 0.6rem; }
 
 .requests { list-style: none; padding: 0; }
 .requests li { padding: 0.35rem 0; border-bottom: 1px solid #26252c; font-size: 0.92rem; }
