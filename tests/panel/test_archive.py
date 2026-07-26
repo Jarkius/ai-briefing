@@ -107,7 +107,7 @@ def test_record_and_load_send_status_roundtrip(tmp_path):
         bdb.record_send_status("briefing_y.md", {"part1": "error: boom", "part2": "sent"})
         log = bdb.load_send_status()
     assert log["briefing_x.md"]["status"] == "sent"       # already_sent counts as delivered
-    assert log["briefing_y.md"]["status"] == "error"
+    assert log["briefing_y.md"]["status"] == "partial"    # one part DID deliver
 
 
 def test_archive_send_button_shown_for_draft(tmp_path):

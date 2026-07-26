@@ -118,12 +118,16 @@ def record_send_status(archive_file: str, result: dict) -> None:
     from datetime import datetime
 
     statuses = set(result.values())
-    if statuses <= {"sent", "already_sent"}:
+    delivered = {"sent", "already_sent"}
+    if statuses <= delivered:
         status = "sent"
-    elif any(str(v).startswith("error") for v in statuses):
-        status = "error"
-    else:
+    elif statuses & delivered:
+        # Some parts reached the inbox, some failed — 'error' here would
+        # falsely imply nothing delivered (found by hunt-5am: the old
+        # ordering made this branch dead code).
         status = "partial"
+    else:
+        status = "error"
     log = load_send_status()
     log[archive_file] = {
         "status": status,

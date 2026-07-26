@@ -150,3 +150,17 @@ def test_existing_subscription_names_returns_pairs(tmp_path):
         ("youtube", "some-channel"),
         ("news", "some-preset"),
     }
+
+
+def test_record_send_status_partial_when_mixed(tmp_path):
+    from unittest.mock import patch
+
+    from briefing import db as bdb
+
+    with patch.object(bdb, "SEND_STATUS_PATH", str(tmp_path / "s.json")), \
+         patch.object(bdb.config, "DATA_DIR", str(tmp_path)):
+        bdb.record_send_status("a.md", {"part1": "sent", "part2": "error: blip"})
+        bdb.record_send_status("b.md", {"part1": "error: x", "part2": "error: y"})
+        log = bdb.load_send_status()
+    assert log["a.md"]["status"] == "partial"  # half delivered != error
+    assert log["b.md"]["status"] == "error"

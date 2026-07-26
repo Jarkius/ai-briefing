@@ -331,7 +331,14 @@ def _bedrock_call(system: str, user: str, max_attempts: int) -> str:
     the anthropic SDK is only needed when this tier is enabled and reached."""
     from anthropic import AnthropicBedrock
 
-    client = AnthropicBedrock(aws_region=config.BEDROCK_REGION)
+    # Hard per-request ceiling: the SDK's defaults (600s read timeout ×
+    # 2 internal retries) under OUR 4-attempt loop meant a hanging (not
+    # erroring) connection could stall one section call for ~2h and the 5am
+    # run for ~4h, never reaching Send. A newsletter section takes ~5-30s;
+    # 120s is generous. SDK retries off — this function owns retrying.
+    client = AnthropicBedrock(
+        aws_region=config.BEDROCK_REGION, timeout=120.0, max_retries=0
+    )
     last_error = None
     for attempt in range(max_attempts):
         try:
