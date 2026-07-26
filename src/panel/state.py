@@ -7,6 +7,8 @@ server shows an explicit "no generation yet" state instead of a silently
 re-dated reconstruction.
 """
 
+import threading
+
 LAST_GENERATION: dict | None = None  # generate()'s return dict, verbatim
 
 # Findings text from the last completed dashboard research job. The next
@@ -15,31 +17,35 @@ LAST_GENERATION: dict | None = None  # generate()'s return dict, verbatim
 # regenerate doesn't repeat a stale "Requested Research" section.
 LAST_RESEARCH_FINDINGS: str = ""
 
+# Mutations come from both the event loop and to_thread worker threads —
+# real OS threads, so read-modify-write on the globals needs a real lock
+# (a double-clicked Regenerate could otherwise split pop into two reads).
+_LOCK = threading.Lock()
+
 
 def set_generation(result: dict) -> None:
     global LAST_GENERATION
-    LAST_GENERATION = result
+    with _LOCK:
+        LAST_GENERATION = result
 
 
 def get_generation() -> dict | None:
     return LAST_GENERATION
 
 
-def set_research_findings(text: str) -> None:
-    global LAST_RESEARCH_FINDINGS
-    LAST_RESEARCH_FINDINGS = text
-
-
 def add_research_findings(text: str) -> None:
-    """Append a findings block (e.g. user-pasted material) without clobbering
-    findings from a completed research job."""
+    """Append a findings block — used by BOTH the paste form and completed
+    research jobs. Append-only by design: a research job finishing must not
+    clobber material the user pasted while it ran (and vice versa)."""
     global LAST_RESEARCH_FINDINGS
-    LAST_RESEARCH_FINDINGS = (
-        f"{LAST_RESEARCH_FINDINGS}\n\n{text}" if LAST_RESEARCH_FINDINGS else text
-    )
+    with _LOCK:
+        LAST_RESEARCH_FINDINGS = (
+            f"{LAST_RESEARCH_FINDINGS}\n\n{text}" if LAST_RESEARCH_FINDINGS else text
+        )
 
 
 def pop_research_findings() -> str:
     global LAST_RESEARCH_FINDINGS
-    text, LAST_RESEARCH_FINDINGS = LAST_RESEARCH_FINDINGS, ""
+    with _LOCK:
+        text, LAST_RESEARCH_FINDINGS = LAST_RESEARCH_FINDINGS, ""
     return text

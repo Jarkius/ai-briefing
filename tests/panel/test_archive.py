@@ -162,3 +162,15 @@ def test_archive_unknown_view_shows_not_found_not_fallback(tmp_path):
     assert "No archived edition named" in r.text
     # must NOT render the newest archive as if it were the requested one
     assert r.text.count("srcdoc") == 0
+
+
+def test_invalid_calendar_date_archive_skipped_not_500(tmp_path):
+    # hunt-panel HIGH#1: shape-valid but calendar-invalid filename must not
+    # crash the whole tab when auto-selected as newest.
+    (tmp_path / "briefing_2026-13-45_9999.md").write_text(FULL_MD)
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)):
+        r = client.get("/archive")
+    assert r.status_code == 200
+    assert "briefing_2026-13-45_9999.md" not in r.text  # skipped from list
+    assert "briefing_2026-07-24_0500.md" in r.text      # valid one renders

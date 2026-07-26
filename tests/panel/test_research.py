@@ -112,6 +112,8 @@ def test_research_findings_flow_into_next_regenerate():
     from panel import state
     from panel.app import _research_job
 
+    state.LAST_RESEARCH_FINDINGS = ""  # clean slate — append semantics accumulate
+
     class FakeLock:
         def __enter__(self):
             return None
@@ -180,3 +182,30 @@ def test_research_paste_appends_not_clobbers():
 def test_research_paste_rejects_empty():
     r = client.post("/research/paste", data={"title": "x", "content": "   "})
     assert "nothing pasted" in r.text
+
+
+def test_research_job_appends_findings_never_clobbers_paste():
+    # hunt-panel HIGH#3: paste while research runs -> job completion must
+    # not discard the pasted block.
+    import asyncio
+
+    from panel import state
+    from panel.app import _research_job
+
+    class FakeLock:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *a):
+            return None
+
+    state.LAST_RESEARCH_FINDINGS = "### pasted by user\n\nmy notes"
+    try:
+        with patch("panel.app.mcp_client.mcp_lock", return_value=FakeLock()), \
+             patch("panel.app.researcher.run_pending_async", new=AsyncMock(return_value=("### job findings\n\nfrom research", 1))), \
+             patch("panel.app._pathspec_commit", return_value=None):
+            asyncio.run(_research_job(lambda t: None))
+        assert "my notes" in state.LAST_RESEARCH_FINDINGS
+        assert "from research" in state.LAST_RESEARCH_FINDINGS
+    finally:
+        state.LAST_RESEARCH_FINDINGS = ""

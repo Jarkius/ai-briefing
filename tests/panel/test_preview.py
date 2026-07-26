@@ -136,3 +136,24 @@ def test_preview_shows_pending_strip(tmp_path):
         assert "2 drafts in the archive" in r.text
     finally:
         state.LAST_RESEARCH_FINDINGS = ""
+
+
+def test_regenerate_double_submit_reattaches_not_duplicates():
+    jobs.JOBS.clear()
+    jobs.JOBS["busy1"] = jobs.Job(name="regenerate")  # running
+    r = client.post("/preview/regenerate")
+    assert "busy1" in r.text        # reattached to the running job
+    assert len(jobs.JOBS) == 1      # no second job spawned
+    jobs.JOBS.clear()
+
+
+def test_send_double_submit_reattaches():
+    state.set_generation(FAKE_GEN)
+    jobs.JOBS["sendbusy"] = jobs.Job(name="send")
+    try:
+        r = client.post("/preview/send")
+        assert "sendbusy" in r.text
+        assert len(jobs.JOBS) == 1
+    finally:
+        jobs.JOBS.clear()
+        state.LAST_GENERATION = None

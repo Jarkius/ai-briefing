@@ -108,6 +108,12 @@ def _send_job() -> dict:
 
 @app.post("/preview/regenerate", response_class=HTMLResponse)
 async def preview_regenerate():
+    # Double-click guard: two concurrent regenerates race on
+    # pop_research_findings and last-writer-wins the preview state —
+    # reattach to the running job instead of spawning a second.
+    existing = jobs.running_job("regenerate")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
     job_id = jobs.submit_sync("regenerate", _regenerate_job)
     return HTMLResponse(_job_fragment(job_id))
 
@@ -116,6 +122,11 @@ async def preview_regenerate():
 async def preview_send():
     if state.get_generation() is None:
         return HTMLResponse('<div class="banner banner-err">Nothing generated yet — regenerate first.</div>')
+    # Double-click guard: the IMAP/API dedup pre-check is check-then-act —
+    # two simultaneous sends could both pass it and double-deliver.
+    existing = jobs.running_job("send")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
     job_id = jobs.submit_sync("send", _send_job)
     return HTMLResponse(_job_fragment(job_id))
 
@@ -197,7 +208,9 @@ async def _research_job(phase) -> str:
     if count:
         # Stash for the next dashboard Regenerate → "Requested Research"
         # section in the newsletter, mirroring run.py's phase handoff.
-        state.set_research_findings(findings)
+        # Append, never set — the user may have pasted material while this
+        # job ran; a clobber here silently discarded it (hunt-panel HIGH#3).
+        state.add_research_findings(findings)
         err = _pathspec_commit(
             "dashboard: research request completed", config.RESEARCH_REQUESTS_PATH
         )
@@ -529,6 +542,12 @@ def _list_archives() -> list[dict]:
             if not m:
                 continue
             date_part, time_part = m.groups()
+            # Shape-valid but calendar-invalid dates (2026-13-45) would crash
+            # rendering when auto-selected as entries[0] — skip them here.
+            try:
+                datetime.strptime(date_part, "%Y-%m-%d")
+            except ValueError:
+                continue
             hh, mm = time_part[:2], time_part[2:4]
             labels = _archive_research_labels(os.path.join(config.ARCHIVE_DIR, fname))
             sent = send_log.get(fname, {})
@@ -546,7 +565,12 @@ def _list_archives() -> list[dict]:
 def _archive_date_str(date_part: str) -> str:
     """Human date for the masthead, from the ARCHIVE's date — not today's.
     Same %-d-free construction as generator.generate (Windows-safe)."""
-    d = datetime.strptime(date_part, "%Y-%m-%d")
+    # The filename regex checks digit SHAPE only — 2026-13-45 matches it but
+    # isn't a calendar date, and one such file must not 500 the whole tab.
+    try:
+        d = datetime.strptime(date_part, "%Y-%m-%d")
+    except ValueError:
+        return date_part
     return f"{d.strftime('%A, %B')} {d.day}, {d.year}"
 
 
@@ -622,6 +646,9 @@ async def archive_send(view: str = Form(...)):
     entry = next((e for e in _list_archives() if e["file"] == view), None)
     if entry is None:
         return HTMLResponse(_banner("err", "unknown archive"))
+    existing = jobs.running_job("send")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
     job_id = jobs.submit_sync("send", _archive_send_job, entry["file"], entry["date"])
     return HTMLResponse(_job_fragment(job_id))
 

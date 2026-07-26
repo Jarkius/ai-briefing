@@ -28,9 +28,29 @@ class Job:
 
 JOBS: dict[str, Job] = {}
 
+# Terminal jobs kept for the UI (job history pane shows 20); beyond this the
+# oldest finished jobs are evicted — a long-lived server must not accumulate
+# one full generate() result dict per click forever.
+MAX_TERMINAL_JOBS = 50
+
+
+def _evict_old_terminal_jobs() -> None:
+    terminal = [jid for jid, j in JOBS.items() if j.status != "running"]
+    for jid in terminal[: max(0, len(terminal) - MAX_TERMINAL_JOBS)]:
+        del JOBS[jid]
+
 
 def any_running() -> bool:
     return any(j.status == "running" for j in JOBS.values())
+
+
+def running_job(name: str) -> str | None:
+    """Job id of a running job with this name, if any — the guard against
+    double-submitting regenerate/send."""
+    for jid, j in JOBS.items():
+        if j.name == name and j.status == "running":
+            return jid
+    return None
 
 
 def get(job_id: str) -> Job | None:
@@ -42,6 +62,7 @@ def submit_sync(name: str, fn, *args, **kwargs) -> str:
     Returns the job id immediately."""
     job_id = uuid.uuid4().hex[:12]
     job = Job(name=name)
+    _evict_old_terminal_jobs()
     JOBS[job_id] = job
 
     async def _runner():
@@ -63,6 +84,7 @@ def submit_async(name: str, coro_fn, *args, **kwargs) -> str:
     The callable receives a phase(text) callback as its first argument."""
     job_id = uuid.uuid4().hex[:12]
     job = Job(name=name)
+    _evict_old_terminal_jobs()
     JOBS[job_id] = job
 
     def phase(text: str):

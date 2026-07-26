@@ -126,3 +126,34 @@ def test_any_running_reflects_registry_state():
         assert jobs.any_running() is False
     finally:
         del jobs.JOBS["x"]
+
+
+def test_terminal_jobs_evicted_beyond_cap():
+    jobs.JOBS.clear()
+    for i in range(60):
+        j = jobs.Job(name="old", status="done")
+        jobs.JOBS[f"old{i}"] = j
+    jobs._evict_old_terminal_jobs()
+    assert len(jobs.JOBS) == jobs.MAX_TERMINAL_JOBS
+    # oldest evicted, newest kept (dict preserves insertion order)
+    assert "old0" not in jobs.JOBS
+    assert "old59" in jobs.JOBS
+    jobs.JOBS.clear()
+
+
+def test_eviction_never_removes_running_jobs():
+    jobs.JOBS.clear()
+    for i in range(60):
+        jobs.JOBS[f"r{i}"] = jobs.Job(name="research")  # status=running
+    jobs._evict_old_terminal_jobs()
+    assert len(jobs.JOBS) == 60  # running jobs are untouchable
+    jobs.JOBS.clear()
+
+
+def test_running_job_lookup():
+    jobs.JOBS.clear()
+    jobs.JOBS["a"] = jobs.Job(name="send", status="done")
+    jobs.JOBS["b"] = jobs.Job(name="send")  # running
+    assert jobs.running_job("send") == "b"
+    assert jobs.running_job("regenerate") is None
+    jobs.JOBS.clear()
