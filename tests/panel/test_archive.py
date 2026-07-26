@@ -153,3 +153,12 @@ def test_archive_filter_chips(tmp_path):
         r = client.get("/archive?show=drafts")
     assert "briefing_2026-07-24_0500.md" in r.text
     assert "briefing_2026-07-25_0600.md" not in r.text
+
+
+def test_archive_unknown_view_shows_not_found_not_fallback(tmp_path):
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    with _archive_dir(tmp_path) if False else patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)):
+        r = client.get("/archive?view=nonexistent.md")
+    assert "No archived edition named" in r.text
+    # must NOT render the newest archive as if it were the requested one
+    assert r.text.count("srcdoc") == 0

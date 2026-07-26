@@ -6,6 +6,9 @@
   <a href="/archive?show=sent" class="filter-chip {{ 'on' if show == 'sent' }}">✉ sent</a>
   <a href="/archive?show=drafts" class="filter-chip {{ 'on' if show == 'drafts' }}">drafts</a>
 </div>
+{% if not_found %}
+<div class="banner banner-warn">No archived edition named “{{ not_found }}” {{ 'in this filter — try “all”' if show != 'all' else '— it may have been renamed or is on the other machine' }}.</div>
+{% endif %}
 {% if not entries %}
 <div class="empty-state">
   <span class="empty-drop">A</span>

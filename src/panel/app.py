@@ -573,19 +573,25 @@ async def archive_page(request: Request, view: str = "", show: str = "all"):
         entries = [e for e in entries if not e["send_status"]]
     selected = None
     parts = None
+    not_found = ""
     if view:
         # basename() strips any path tricks; then the entry must match a real
         # listed archive — /archive can never read outside ARCHIVE_DIR.
         view = os.path.basename(view)
         selected = next((e for e in entries if e["file"] == view), None)
-    if selected is None and entries:
+        if selected is None:
+            # Explicit not-found instead of silently serving the newest —
+            # a stale bookmark or filtered-out entry shouldn't masquerade
+            # as a different edition.
+            not_found = view
+    if selected is None and entries and not not_found:
         selected = entries[0]
     if selected:
         parts = _render_archive(selected["file"], selected["date"])
     return templates.TemplateResponse(
         request, "archive.html",
         {"active": "archive", "entries": entries, "selected": selected,
-         "parts": parts, "show": show},
+         "parts": parts, "show": show, "not_found": not_found},
     )
 
 
