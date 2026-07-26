@@ -314,7 +314,11 @@ def _claude_cli_call(system: str, user: str) -> str:
             timeout=300,
         )
     if result.returncode != 0:
-        raise RuntimeError(f"claude -p exited {result.returncode}: {result.stderr.strip()}")
+        # The CLI reports usage-limit/auth errors on STDOUT with an empty
+        # stderr — observed 2026-07-26: "exited 1: " told us nothing and hid
+        # the real reason the 5am fallback died. Include both streams.
+        detail = (result.stderr.strip() or result.stdout.strip())[:300]
+        raise RuntimeError(f"claude -p exited {result.returncode}: {detail}")
     if not result.stdout.strip():
         raise RuntimeError("claude -p returned empty output")
     return result.stdout.strip()
