@@ -390,9 +390,20 @@ def _read_env_lines() -> list[str]:
         return f.read().splitlines()
 
 
+CLAUDE_CLI_MODELS = ["sonnet", "opus", "haiku"]
+
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    values = {k: os.environ.get(k, "") for k in SETTINGS_KEYS if k != "PROVIDER_ORDER"}
+    # Effective values: .env/environ where set, else the config default —
+    # so BEDROCK_MODEL/REGION etc. never render as misleading empty fields.
+    def effective(key: str) -> str:
+        env_val = os.environ.get(key, "")
+        if env_val:
+            return env_val
+        return str(getattr(config, key, "") or "")
+
+    values = {k: effective(k) for k in SETTINGS_KEYS if k != "PROVIDER_ORDER"}
     # Current order first, then any known provider not yet in the list
     order = [p for p in config.PROVIDER_ORDER if p in KNOWN_PROVIDERS]
     order += [p for p in KNOWN_PROVIDERS if p not in order]
@@ -402,7 +413,8 @@ async def settings_page(request: Request):
     ]
     return templates.TemplateResponse(
         request, "settings.html",
-        {"active": "settings", "values": values, "providers": providers},
+        {"active": "settings", "values": values, "providers": providers,
+         "cli_models": CLAUDE_CLI_MODELS},
     )
 
 

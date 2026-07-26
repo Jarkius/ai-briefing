@@ -6,24 +6,39 @@ localhost only — do not port-forward or expose port 8787.</div>
 
 <form hx-post="/settings" hx-target="#banner" hx-swap="innerHTML" class="settings-form" id="settings-form">
 
-  <h2 class="muted">AI providers — drag to reorder (first = tried first)</h2>
+  <h2 class="muted">AI providers</h2>
+  <p class="drag-hint">⠿ Drag a row (or use the ▲▼ buttons) to reorder — <strong>#1 is tried first</strong>, the rest are fallbacks in order. Remember to Save.</p>
   <ul class="provider-list" id="provider-list">
     {% for p in providers %}
     <li class="provider-row" draggable="true" data-provider="{{ p.name }}">
-      <span class="grip">⠿</span>
+      <span class="grip" title="drag to reorder">⠿</span>
       <span class="p-rank">{{ loop.index }}</span>
       <span class="p-label">{{ p.label }}</span>
       <span class="p-status {{ 'ok' if p.status in ('enabled', 'key set', 'installed') else 'off' }}">{{ p.status }}</span>
+      <span class="p-arrows">
+        <button type="button" class="move-up" title="move up">▲</button>
+        <button type="button" class="move-down" title="move down">▼</button>
+      </span>
     </li>
     {% endfor %}
   </ul>
 
   <h2 class="muted" style="margin-top:1.6rem">Credentials & models</h2>
   {% for key, val in values.items() %}
+  {% if key == "CLAUDE_CLI_MODEL" %}
+  <label>{{ key }}
+    <select name="{{ key }}">
+      {% for m in cli_models %}
+      <option value="{{ m }}" {{ 'selected' if m == val else '' }}>{{ m }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% else %}
   <label>{{ key }}
     <input type="{{ 'password' if 'PASSWORD' in key or 'KEY' in key else 'text' }}"
            name="{{ key }}" value="{{ val }}" autocomplete="off">
   </label>
+  {% endif %}
   {% endfor %}
   <div class="actions" style="margin-top:0.8rem"><button type="submit">Save</button></div>
 </form>
@@ -31,19 +46,53 @@ localhost only — do not port-forward or expose port 8787.</div>
 
 <script>
 // Drag-to-reorder for the provider list; on submit, inject hidden inputs
-// provider_order_0..n reflecting the display order.
+// provider_order_0..n reflecting the display order. ▲▼ buttons are the
+// no-drag alternative (also the touch/trackpad-friendly path).
 const list = document.getElementById('provider-list');
 let dragging = null;
-list.addEventListener('dragstart', e => { dragging = e.target.closest('.provider-row'); });
+
+function renumber() {
+  list.querySelectorAll('.p-rank').forEach((el, i) => el.textContent = i + 1);
+}
+function clearDropMarks() {
+  list.querySelectorAll('.provider-row').forEach(r =>
+    r.classList.remove('drop-above', 'drop-below'));
+}
+
+list.addEventListener('dragstart', e => {
+  dragging = e.target.closest('.provider-row');
+  dragging.classList.add('dragging');
+});
+list.addEventListener('dragend', () => {
+  if (dragging) dragging.classList.remove('dragging');
+  dragging = null;
+  clearDropMarks();
+  renumber();
+});
 list.addEventListener('dragover', e => {
   e.preventDefault();
   const over = e.target.closest('.provider-row');
   if (!over || over === dragging) return;
   const rect = over.getBoundingClientRect();
   const after = (e.clientY - rect.top) > rect.height / 2;
+  clearDropMarks();
+  over.classList.add(after ? 'drop-below' : 'drop-above');
   list.insertBefore(dragging, after ? over.nextSibling : over);
-  list.querySelectorAll('.p-rank').forEach((el, i) => el.textContent = i + 1);
+  renumber();
 });
+
+list.addEventListener('click', e => {
+  const btn = e.target.closest('.move-up, .move-down');
+  if (!btn) return;
+  const row = btn.closest('.provider-row');
+  if (btn.classList.contains('move-up') && row.previousElementSibling) {
+    list.insertBefore(row, row.previousElementSibling);
+  } else if (btn.classList.contains('move-down') && row.nextElementSibling) {
+    list.insertBefore(row.nextElementSibling, row);
+  }
+  renumber();
+});
+
 document.getElementById('settings-form').addEventListener('htmx:configRequest', e => {
   list.querySelectorAll('.provider-row').forEach((row, i) => {
     e.detail.parameters['provider_order_' + i] = row.dataset.provider;

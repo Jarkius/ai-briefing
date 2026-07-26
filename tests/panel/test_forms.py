@@ -201,3 +201,20 @@ def test_settings_post_ignores_unknown_provider_names(tmp_path):
             "provider_order_2": "gemini",
         })
     assert "PROVIDER_ORDER=bedrock,gemini" in env.read_text()
+
+
+def test_settings_shows_effective_defaults_not_empty(tmp_path, monkeypatch):
+    # BEDROCK_MODEL/REGION have config defaults but may be absent from
+    # os.environ — the form must show the effective value, never blank.
+    monkeypatch.delenv("BEDROCK_MODEL", raising=False)
+    monkeypatch.delenv("BEDROCK_REGION", raising=False)
+    r = client.get("/settings")
+    assert 'name="BEDROCK_MODEL" value=""' not in r.text
+    assert "claude-sonnet-5" in r.text  # config default surfaced
+
+
+def test_settings_claude_cli_model_is_dropdown():
+    r = client.get("/settings")
+    assert '<select name="CLAUDE_CLI_MODEL">' in r.text
+    for m in ("sonnet", "opus", "haiku"):
+        assert f'value="{m}"' in r.text
