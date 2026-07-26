@@ -179,7 +179,20 @@ def test_sanitize_bare_url_and_link_together():
     assert "https://bare.example.com/b" not in sanitized
 
 
-# ---- _grok_call: maxplus -> Gemini-direct provider chain -------------------
+# ---- _grok_call: configurable provider chain --------------------------------
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_real_providers():
+    """Pin the provider chain for every test in this module. Without this,
+    the bedrock tier (enabled by default, real AWS creds on dev machines)
+    would make LIVE API calls from unit tests — observed: tests received
+    actual 'Hello! How can I help you today?' responses from Bedrock."""
+    with patch.object(config, "BEDROCK_ENABLED", False), \
+         patch.object(config, "PROVIDER_ORDER", ["maxplus", "gemini", "claude-cli"]):
+        yield
 
 
 def _http_error(code, body=b'{"error": "boom"}'):
@@ -385,4 +398,56 @@ def test_claude_cli_tier_raises_after_three_failures():
          patch("briefing.generator.time.sleep"):
         import pytest as _pytest
         with _pytest.raises(RuntimeError, match="persistent"):
+            _grok_call("sys", "user")
+
+
+# ---- provider order configurability -----------------------------------------
+
+
+def test_provider_order_respected():
+    calls = []
+    with patch.object(config, "PROVIDER_ORDER", ["gemini", "maxplus"]), \
+         patch.object(config, "GEMINI_API_KEY", "g"), \
+         patch.object(config, "MAXPLUS_API_KEY", "m"), \
+         patch("briefing.generator._gemini_call", side_effect=lambda *a: calls.append("gemini") or (_ for _ in ()).throw(RuntimeError("g down"))), \
+         patch("briefing.generator._maxplus_call", side_effect=lambda *a: calls.append("maxplus") or "maxplus reply"):
+        result = _grok_call("sys", "user")
+    assert result == "maxplus reply"
+    assert calls == ["gemini", "maxplus"]
+
+
+def test_unknown_provider_name_skipped_not_fatal():
+    with patch.object(config, "PROVIDER_ORDER", ["carrier-pigeon", "gemini"]), \
+         patch.object(config, "GEMINI_API_KEY", "g"), \
+         patch("briefing.generator._gemini_call", return_value="gemini reply"):
+        assert _grok_call("sys", "user") == "gemini reply"
+
+
+def test_bedrock_first_when_ordered():
+    with patch.object(config, "PROVIDER_ORDER", ["bedrock", "gemini"]), \
+         patch.object(config, "BEDROCK_ENABLED", True), \
+         patch.object(config, "GEMINI_API_KEY", "g"), \
+         patch("briefing.generator._bedrock_call", return_value="bedrock reply") as bcall, \
+         patch("briefing.generator._gemini_call") as gcall:
+        assert _grok_call("sys", "user") == "bedrock reply"
+    bcall.assert_called_once()
+    gcall.assert_not_called()
+
+
+def test_bedrock_failure_falls_through():
+    with patch.object(config, "PROVIDER_ORDER", ["bedrock", "gemini"]), \
+         patch.object(config, "BEDROCK_ENABLED", True), \
+         patch.object(config, "GEMINI_API_KEY", "g"), \
+         patch("briefing.generator._bedrock_call", side_effect=RuntimeError("aws down")), \
+         patch("briefing.generator._gemini_call", return_value="gemini reply"):
+        assert _grok_call("sys", "user") == "gemini reply"
+
+
+def test_no_provider_available_raises_clear_error():
+    with patch.object(config, "PROVIDER_ORDER", ["bedrock", "gemini", "maxplus", "claude-cli"]), \
+         patch.object(config, "BEDROCK_ENABLED", False), \
+         patch.object(config, "GEMINI_API_KEY", ""), \
+         patch.object(config, "MAXPLUS_API_KEY", ""), \
+         patch.object(config, "CLAUDE_CLI_ENABLED", False):
+        with pytest.raises(RuntimeError, match="No AI provider available"):
             _grok_call("sys", "user")

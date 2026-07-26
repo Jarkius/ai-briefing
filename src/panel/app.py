@@ -350,8 +350,37 @@ async def schedule_save(hour: int = Form(...), minute: int = Form(...)):
 # Only these keys are exposed/editable — the .env may hold other tooling vars.
 SETTINGS_KEYS = [
     "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "RECIPIENT_EMAIL",
+    "PROVIDER_ORDER",
+    "BEDROCK_MODEL", "BEDROCK_REGION",
     "GEMINI_API_KEY", "GEMINI_MODEL", "MAXPLUS_API_KEY", "MAXPLUS_MODEL",
+    "CLAUDE_CLI_MODEL",
 ]
+
+KNOWN_PROVIDERS = ["bedrock", "gemini", "maxplus", "claude-cli"]
+
+PROVIDER_LABELS = {
+    "bedrock": "Claude — AWS Bedrock (uses this machine's AWS credentials)",
+    "gemini": "Google Gemini (direct API, free-tier quota)",
+    "maxplus": "maxplus pool (OpenAI-compatible gateway, needs credit)",
+    "claude-cli": "Claude CLI (local `claude -p`, uses your subscription)",
+}
+
+
+def _provider_status(name: str) -> str:
+    """Availability badge for the settings page — mirrors the generator's
+    own _provider_available logic without importing its call table."""
+    if name == "bedrock":
+        return "enabled" if config.BEDROCK_ENABLED else "disabled"
+    if name == "gemini":
+        return "key set" if config.GEMINI_API_KEY else "no key"
+    if name == "maxplus":
+        return "key set" if config.MAXPLUS_API_KEY else "no key"
+    if name == "claude-cli":
+        import shutil as _shutil
+        if not config.CLAUDE_CLI_ENABLED:
+            return "disabled"
+        return "installed" if _shutil.which("claude") else "not on PATH"
+    return "?"
 
 
 def _read_env_lines() -> list[str]:
@@ -363,15 +392,35 @@ def _read_env_lines() -> list[str]:
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    values = {k: os.environ.get(k, "") for k in SETTINGS_KEYS}
+    values = {k: os.environ.get(k, "") for k in SETTINGS_KEYS if k != "PROVIDER_ORDER"}
+    # Current order first, then any known provider not yet in the list
+    order = [p for p in config.PROVIDER_ORDER if p in KNOWN_PROVIDERS]
+    order += [p for p in KNOWN_PROVIDERS if p not in order]
+    providers = [
+        {"name": p, "label": PROVIDER_LABELS[p], "status": _provider_status(p)}
+        for p in order
+    ]
     return templates.TemplateResponse(
-        request, "settings.html", {"active": "settings", "values": values}
+        request, "settings.html",
+        {"active": "settings", "values": values, "providers": providers},
     )
 
 
 @app.post("/settings", response_class=HTMLResponse)
 async def settings_save(request: Request):
     form = await request.form()
+    form = dict(form)
+    # provider_order arrives as an ordered list of hidden inputs (one per
+    # row, in display order) — join into the env value.
+    order = [
+        v for k, v in sorted(
+            ((k, v) for k, v in form.items() if k.startswith("provider_order_")),
+            key=lambda kv: int(kv[0].rsplit("_", 1)[1]),
+        )
+        if v in KNOWN_PROVIDERS
+    ]
+    if order:
+        form["PROVIDER_ORDER"] = ",".join(order)
     # Rewrite only known keys in place, preserving unrelated lines/comments.
     # Values are NEVER logged (plan step 15).
     lines = _read_env_lines()

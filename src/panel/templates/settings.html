@@ -3,7 +3,22 @@
 <h1>Settings</h1>
 <div class="banner banner-warn">These values live in .env (gitignored, never committed). This page is served on
 localhost only — do not port-forward or expose port 8787.</div>
-<form hx-post="/settings" hx-target="#banner" hx-swap="innerHTML" class="settings-form">
+
+<form hx-post="/settings" hx-target="#banner" hx-swap="innerHTML" class="settings-form" id="settings-form">
+
+  <h2 class="muted">AI providers — drag to reorder (first = tried first)</h2>
+  <ul class="provider-list" id="provider-list">
+    {% for p in providers %}
+    <li class="provider-row" draggable="true" data-provider="{{ p.name }}">
+      <span class="grip">⠿</span>
+      <span class="p-rank">{{ loop.index }}</span>
+      <span class="p-label">{{ p.label }}</span>
+      <span class="p-status {{ 'ok' if p.status in ('enabled', 'key set', 'installed') else 'off' }}">{{ p.status }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <h2 class="muted" style="margin-top:1.6rem">Credentials & models</h2>
   {% for key, val in values.items() %}
   <label>{{ key }}
     <input type="{{ 'password' if 'PASSWORD' in key or 'KEY' in key else 'text' }}"
@@ -13,4 +28,26 @@ localhost only — do not port-forward or expose port 8787.</div>
   <div class="actions" style="margin-top:0.8rem"><button type="submit">Save</button></div>
 </form>
 <div id="banner"></div>
+
+<script>
+// Drag-to-reorder for the provider list; on submit, inject hidden inputs
+// provider_order_0..n reflecting the display order.
+const list = document.getElementById('provider-list');
+let dragging = null;
+list.addEventListener('dragstart', e => { dragging = e.target.closest('.provider-row'); });
+list.addEventListener('dragover', e => {
+  e.preventDefault();
+  const over = e.target.closest('.provider-row');
+  if (!over || over === dragging) return;
+  const rect = over.getBoundingClientRect();
+  const after = (e.clientY - rect.top) > rect.height / 2;
+  list.insertBefore(dragging, after ? over.nextSibling : over);
+  list.querySelectorAll('.p-rank').forEach((el, i) => el.textContent = i + 1);
+});
+document.getElementById('settings-form').addEventListener('htmx:configRequest', e => {
+  list.querySelectorAll('.provider-row').forEach((row, i) => {
+    e.detail.parameters['provider_order_' + i] = row.dataset.provider;
+  });
+});
+</script>
 {% endblock %}

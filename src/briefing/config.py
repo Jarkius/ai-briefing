@@ -52,6 +52,8 @@ def _bind():
     where 'a fresh run picks it up' doesn't apply."""
     global MAXPLUS_API_KEY, MAXPLUS_MODEL, GEMINI_API_KEY, GEMINI_MODEL
     global CLAUDE_CLI_ENABLED, CLAUDE_CLI_MODEL
+    global BEDROCK_ENABLED, BEDROCK_MODEL, BEDROCK_REGION
+    global PROVIDER_ORDER
     global GMAIL_ADDRESS, GMAIL_APP_PASSWORD, RECIPIENT_EMAIL, RECIPIENT_EMAILS
     global REQUIRED_ENV
 
@@ -70,6 +72,20 @@ def _bind():
     # should stay low.
     CLAUDE_CLI_ENABLED = os.environ.get("CLAUDE_CLI_ENABLED", "1").strip().lower() not in ("0", "false", "no")
     CLAUDE_CLI_MODEL = os.environ.get("CLAUDE_CLI_MODEL", "sonnet")
+    # Claude on AWS Bedrock (uses the machine's AWS credentials — same ones
+    # Claude Code runs on via CLAUDE_CODE_USE_BEDROCK). Region-prefixed
+    # Bedrock model ID; sonnet-4-5 verified accessible on this account.
+    BEDROCK_ENABLED = os.environ.get("BEDROCK_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+    BEDROCK_MODEL = os.environ.get("BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    BEDROCK_REGION = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "ap-southeast-1"))
+    # Comma-separated provider chain for the Generate phase, tried in order.
+    # Known names: bedrock, maxplus, gemini, claude-cli. Unknown names are
+    # skipped with a log line (so a typo can't kill the 5am run).
+    PROVIDER_ORDER = [
+        p.strip().lower()
+        for p in os.environ.get("PROVIDER_ORDER", "bedrock,gemini,maxplus,claude-cli").split(",")
+        if p.strip()
+    ]
     GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
     GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
     RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)

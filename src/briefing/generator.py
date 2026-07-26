@@ -325,40 +325,102 @@ def _claude_cli_call(system: str, user: str) -> str:
     return result.stdout.strip()
 
 
-def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
-    """Provider chain: maxplus first (if MAXPLUS_API_KEY is set), then the
-    direct Gemini API (if GEMINI_API_KEY is set), then the local Claude CLI
-    (if enabled and installed) as the final safety net. API tiers come
-    first since they're faster and don't consume the interactive Claude
-    session pool. Each tier logs its failure and falls through; raises the
-    last provider's error if every configured tier fails."""
+def _bedrock_call(system: str, user: str, max_attempts: int) -> str:
+    """Claude on AWS Bedrock, authenticated via the machine's AWS credentials
+    (same chain Claude Code uses under CLAUDE_CODE_USE_BEDROCK). Lazy import:
+    the anthropic SDK is only needed when this tier is enabled and reached."""
+    from anthropic import AnthropicBedrock
+
+    client = AnthropicBedrock(aws_region=config.BEDROCK_REGION)
     last_error = None
-    if config.MAXPLUS_API_KEY:
+    for attempt in range(max_attempts):
         try:
-            return _maxplus_call(system, user, max_attempts)
+            response = client.messages.create(
+                model=config.BEDROCK_MODEL,
+                max_tokens=4000,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+            text = next((b.text for b in response.content if b.type == "text"), None)
+            if not text:
+                raise ValueError("Bedrock response contained no text block")
+            return text
+        except Exception as e:
+            # Auth/permission/validation errors are deterministic — fail fast
+            # to the next provider instead of burning the backoff budget.
+            name = type(e).__name__
+            if name in ("PermissionDeniedError", "AuthenticationError", "BadRequestError", "NotFoundError"):
+                log(f"  Bedrock call failed fast: {name}: {str(e)[:200]}")
+                raise
+            last_error = e
+            log(f"  Bedrock call failed (attempt {attempt + 1}/{max_attempts}): {name}: {str(e)[:200]}")
+            if attempt < max_attempts - 1:
+                time.sleep(10 * (2 ** attempt))
+    raise last_error
+
+
+def _claude_cli_tier(system: str, user: str, max_attempts: int) -> str:
+    """Claude CLI with retries — often the LAST tier, so a single transient
+    blip here kills the whole run (observed 2026-07-26 10:17)."""
+    last_error = None
+    for attempt in range(3):
+        try:
+            return _claude_cli_call(system, user)
         except Exception as e:
             last_error = e
-            log(f"  maxplus unavailable ({e}) — falling back to Gemini direct…")
-    if config.GEMINI_API_KEY:
+            log(f"  Claude CLI failed (attempt {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(15 * (attempt + 1))
+    raise last_error
+
+
+def _provider_available(name: str) -> bool:
+    if name == "bedrock":
+        return config.BEDROCK_ENABLED
+    if name == "maxplus":
+        return bool(config.MAXPLUS_API_KEY)
+    if name == "gemini":
+        return bool(config.GEMINI_API_KEY)
+    if name == "claude-cli":
+        return config.CLAUDE_CLI_ENABLED and _claude_cli_available()
+    return False
+
+
+# Names, not references — resolved via globals() at call time so the
+# functions stay late-bound (test monkeypatching, future hot-reload).
+_PROVIDER_CALLS = {
+    "bedrock": "_bedrock_call",
+    "maxplus": "_maxplus_call",
+    "gemini": "_gemini_call",
+    "claude-cli": "_claude_cli_tier",
+}
+
+
+def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
+    """Provider chain, ordered by config.PROVIDER_ORDER (editable in .env /
+    the panel's Settings tab — default: bedrock, gemini, maxplus, claude-cli).
+    Each configured+available tier is tried in order; failures log and fall
+    through; raises the last provider's error if every tier fails."""
+    last_error = None
+    tried_any = False
+    for name in config.PROVIDER_ORDER:
+        if name not in _PROVIDER_CALLS:
+            log(f"  unknown provider '{name}' in PROVIDER_ORDER — skipping")
+            continue
+        if not _provider_available(name):
+            continue
+        tried_any = True
         try:
-            return _gemini_call(system, user, max_attempts)
+            return globals()[_PROVIDER_CALLS[name]](system, user, max_attempts)
         except Exception as e:
             last_error = e
-            log(f"  Gemini direct failed: {e}")
-    if config.CLAUDE_CLI_ENABLED and _claude_cli_available():
-        # Retries like the API tiers get — this is the LAST tier, so a single
-        # transient blip here kills the whole run (observed 2026-07-26 10:17:
-        # one unexplained exit-1 with every manual repro succeeding).
-        for attempt in range(3):
-            try:
-                return _claude_cli_call(system, user)
-            except Exception as e:
-                last_error = e
-                log(f"  Claude CLI failed (attempt {attempt + 1}/3): {e}")
-                if attempt < 2:
-                    time.sleep(15 * (attempt + 1))
-    if last_error is None:
-        raise RuntimeError("No AI provider configured: set MAXPLUS_API_KEY or GEMINI_API_KEY")
+            log(f"  provider '{name}' failed: {e}")
+    if not tried_any or last_error is None:
+        raise RuntimeError(
+            "No AI provider available: configure one of PROVIDER_ORDER "
+            f"({', '.join(config.PROVIDER_ORDER)}) — set an API key, enable "
+            "Bedrock (AWS credentials), or install the claude CLI"
+        )
     raise last_error
 
 

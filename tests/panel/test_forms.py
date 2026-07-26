@@ -161,3 +161,43 @@ def test_settings_page_masks_secret_inputs():
     r = client.get("/settings")
     assert 'type="password" name="GMAIL_APP_PASSWORD"' in r.text.replace("\n", " ") or \
            'type="password"' in r.text
+
+
+def test_settings_page_shows_provider_order():
+    r = client.get("/settings")
+    assert "provider-list" in r.text
+    # default order: bedrock first
+    import re
+    rows = re.findall(r'data-provider="([a-z-]+)"', r.text)
+    assert rows[0] == "bedrock"
+    assert set(rows) == {"bedrock", "gemini", "maxplus", "claude-cli"}
+
+
+def test_settings_post_saves_provider_order(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("GMAIL_ADDRESS=a@x.com\n")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload") as reload_mock:
+        r = client.post("/settings", data={
+            "provider_order_0": "claude-cli",
+            "provider_order_1": "bedrock",
+            "provider_order_2": "gemini",
+            "provider_order_3": "maxplus",
+        })
+    assert "PROVIDER_ORDER=claude-cli,bedrock,gemini,maxplus" in env.read_text()
+    reload_mock.assert_called_once()
+
+
+def test_settings_post_ignores_unknown_provider_names(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"):
+        client.post("/settings", data={
+            "provider_order_0": "bedrock",
+            "provider_order_1": "carrier-pigeon",
+            "provider_order_2": "gemini",
+        })
+    assert "PROVIDER_ORDER=bedrock,gemini" in env.read_text()
