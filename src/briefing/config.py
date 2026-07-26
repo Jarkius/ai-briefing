@@ -110,10 +110,15 @@ def require_env():
 
         if gmail_api.is_configured():
             missing.remove("GMAIL_APP_PASSWORD")
-    # The generator's provider chain accepts either backend — requiring
-    # specifically MAXPLUS_API_KEY would block a Gemini-only setup.
+    # The generator's provider chain accepts any of three backends —
+    # requiring an API key would block a Claude-CLI-only setup (the CLI is
+    # a full provider tier, not just a fallback). shutil.which mirrors the
+    # generator's own availability check.
     if not (MAXPLUS_API_KEY or GEMINI_API_KEY):
-        missing.append("MAXPLUS_API_KEY or GEMINI_API_KEY")
+        import shutil
+
+        if not (CLAUDE_CLI_ENABLED and shutil.which("claude")):
+            missing.append("MAXPLUS_API_KEY or GEMINI_API_KEY (or claude CLI on PATH)")
     # A blank/comma-only RECIPIENT_EMAIL parses to [] and would only surface
     # at send time, after a full collect/generate cycle.
     if not RECIPIENT_EMAILS:
