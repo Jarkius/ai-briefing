@@ -89,6 +89,8 @@ def _send_job() -> dict:
         )
     finally:
         conn.close()
+    if gen.get("archive_file"):
+        db.record_send_status(gen["archive_file"], result)
     return result
 
 
@@ -485,6 +487,7 @@ def _archive_research_labels(path: str) -> list[str]:
 
 def _list_archives() -> list[dict]:
     """Newest-first list of full-briefing archives with display labels."""
+    send_log = db.load_send_status()
     entries = []
     if os.path.isdir(config.ARCHIVE_DIR):
         for fname in os.listdir(config.ARCHIVE_DIR):
@@ -494,9 +497,13 @@ def _list_archives() -> list[dict]:
             date_part, time_part = m.groups()
             hh, mm = time_part[:2], time_part[2:4]
             labels = _archive_research_labels(os.path.join(config.ARCHIVE_DIR, fname))
+            sent = send_log.get(fname, {})
             entries.append({
                 "file": fname, "date": date_part, "time": f"{hh}:{mm}",
                 "research": labels,
+                # 'sent' | 'partial' | 'error' | '' (never sent / pre-tracking)
+                "send_status": sent.get("status", ""),
+                "sent_at": (sent.get("at") or "")[:16].replace("T", " "),
             })
     entries.sort(key=lambda e: e["file"], reverse=True)
     return entries

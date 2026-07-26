@@ -80,3 +80,31 @@ def test_archive_list_flags_research_entries(tmp_path):
     by_file = {e["file"]: e["research"] for e in entries}
     assert by_file["briefing_2026-07-25_0600.md"] == ["https://youtu.be/abc"]
     assert by_file["briefing_2026-07-24_0500.md"] == []
+
+
+def test_archive_list_shows_send_status(tmp_path):
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    (tmp_path / "briefing_2026-07-25_0600.md").write_text(FULL_MD)
+    send_log = {
+        "briefing_2026-07-25_0600.md": {
+            "status": "sent", "detail": {"part1": "sent", "part2": "sent"},
+            "at": "2026-07-25T06:01:00",
+        }
+    }
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)), \
+         patch("panel.app.db.load_send_status", return_value=send_log):
+        r = client.get("/archive")
+    assert "✉ sent" in r.text          # the emailed one
+    assert "not sent" in r.text        # the never-emailed one
+
+
+def test_record_and_load_send_status_roundtrip(tmp_path):
+    from briefing import db as bdb
+
+    with patch.object(bdb, "SEND_STATUS_PATH", str(tmp_path / "send_status.json")), \
+         patch.object(bdb.config, "DATA_DIR", str(tmp_path)):
+        bdb.record_send_status("briefing_x.md", {"part1": "sent", "part2": "already_sent"})
+        bdb.record_send_status("briefing_y.md", {"part1": "error: boom", "part2": "sent"})
+        log = bdb.load_send_status()
+    assert log["briefing_x.md"]["status"] == "sent"       # already_sent counts as delivered
+    assert log["briefing_y.md"]["status"] == "error"

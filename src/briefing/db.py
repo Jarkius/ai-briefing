@@ -7,6 +7,7 @@ one row per pipeline invocation, so cron and dashboard writers never update
 the same row concurrently (see .omc/plans/2026-07-22-control-panel.md).
 """
 
+import os
 import sqlite3
 
 from . import config
@@ -102,6 +103,50 @@ def existing_subscription_names(conn: sqlite3.Connection) -> set[tuple[str, str]
         (row["source_type"], row["name"])
         for row in conn.execute("SELECT source_type, name FROM subscriptions")
     }
+
+
+SEND_STATUS_PATH = os.path.join(config.DATA_DIR, "send_status.json")
+
+
+def record_send_status(archive_file: str, result: dict) -> None:
+    """Persist the per-archive send outcome (data/send_status.json,
+    per-machine like feeds.db). Called after every send attempt so the
+    panel's Archive tab can badge which issues actually reached the inbox.
+    result is send_two_part_briefing's dict: {'part1': 'sent'|'already_sent'
+    |'error: …', 'part2': …}."""
+    import json
+    from datetime import datetime
+
+    statuses = set(result.values())
+    if statuses <= {"sent", "already_sent"}:
+        status = "sent"
+    elif any(str(v).startswith("error") for v in statuses):
+        status = "error"
+    else:
+        status = "partial"
+    log = load_send_status()
+    log[archive_file] = {
+        "status": status,
+        "detail": result,
+        "at": datetime.now().isoformat(timespec="seconds"),
+    }
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    tmp = SEND_STATUS_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(log, f, indent=2)
+    os.replace(tmp, SEND_STATUS_PATH)
+
+
+def load_send_status() -> dict:
+    import json
+
+    if not os.path.exists(SEND_STATUS_PATH):
+        return {}
+    try:
+        with open(SEND_STATUS_PATH) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def latest_phase_status(conn: sqlite3.Connection, phase_column: str) -> sqlite3.Row | None:

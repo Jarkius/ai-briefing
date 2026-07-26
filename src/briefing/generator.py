@@ -612,6 +612,9 @@ def generate(conn, research_findings: str = "") -> dict:
         "part2_html": part2_html,
         "date_str": date_str,
         "today": today,
+        # Basename of the full-markdown archive this generation wrote —
+        # the key send paths use to record per-issue send status.
+        "archive_file": os.path.basename(archive_path),
     }
 
 

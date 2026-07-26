@@ -10,7 +10,12 @@
     <a href="/archive?view={{ e.file }}"
        class="{{ 'selected' if selected and e.file == selected.file else '' }}">
       <span class="a-date">{{ e.date }}</span>
-      <span class="a-time mono">{{ e.time }}{% if e.research %} <span class="badge-research" title="{{ e.research | join(', ') }}">🔍</span>{% endif %}</span>
+      <span class="a-time mono">{{ e.time }}{% if e.research %} <span class="badge-research" title="research: {{ e.research | join(', ') }}">🔍</span>{% endif %}
+        {%- if e.send_status == 'sent' %} <span class="badge-sent" title="emailed {{ e.sent_at }}">✉ sent</span>
+        {%- elif e.send_status == 'error' %} <span class="badge-senderr" title="send failed {{ e.sent_at }}">✉ failed</span>
+        {%- elif e.send_status == 'partial' %} <span class="badge-senderr" title="partially sent {{ e.sent_at }}">✉ partial</span>
+        {%- else %} <span class="badge-unsent" title="never emailed (or predates send tracking)">not sent</span>
+        {%- endif %}</span>
     </a>
     {% endfor %}
   </nav>
