@@ -10,7 +10,7 @@
     <a href="/archive?view={{ e.file }}"
        class="{{ 'selected' if selected and e.file == selected.file else '' }}">
       <span class="a-date">{{ e.date }}</span>
-      <span class="a-time mono">{{ e.time }}</span>
+      <span class="a-time mono">{{ e.time }}{% if e.research %} <span class="badge-research" title="{{ e.research | join(', ') }}">🔍</span>{% endif %}</span>
     </a>
     {% endfor %}
   </nav>

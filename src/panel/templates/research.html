@@ -16,6 +16,11 @@
   {% for r in requests %}
   <li class="{{ 'done' if r.checked else 'pending' }}">
     <span class="tick">{{ '☑' if r.checked else '☐' }}</span> {{ r.text }}
+    {% if r.archives %}
+    <span class="in-archives">→ in
+      {% for a in r.archives %}<a href="/archive?view={{ a.file }}">{{ a.date }} {{ a.time }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+    </span>
+    {% endif %}
   </li>
   {% else %}
   <li class="muted">none yet</li>

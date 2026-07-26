@@ -66,3 +66,17 @@ def test_archive_empty_state(tmp_path):
 def test_archive_date_str_is_windows_safe():
     # no %-d anywhere; renders unpadded day
     assert _archive_date_str("2026-07-05") == "Sunday, July 5, 2026"
+
+
+def test_archive_list_flags_research_entries(tmp_path):
+    plain = tmp_path / "briefing_2026-07-24_0500.md"
+    plain.write_text(FULL_MD)
+    researched = tmp_path / "briefing_2026-07-25_0600.md"
+    researched.write_text(
+        FULL_MD + "\n\n## 🔍 Requested Research (included in this issue)\n- https://youtu.be/abc\n"
+    )
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)):
+        entries = _list_archives()
+    by_file = {e["file"]: e["research"] for e in entries}
+    assert by_file["briefing_2026-07-25_0600.md"] == ["https://youtu.be/abc"]
+    assert by_file["briefing_2026-07-24_0500.md"] == []

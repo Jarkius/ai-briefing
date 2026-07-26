@@ -135,3 +135,18 @@ def test_research_findings_flow_into_next_regenerate():
     assert gen.call_args.kwargs["research_findings"] == "F1 findings"
     assert state.LAST_RESEARCH_FINDINGS == ""  # consumed, not repeated
     state.LAST_GENERATION = None
+
+
+def test_research_page_links_requests_to_their_archives(tmp_path):
+    reqfile = tmp_path / "research_requests.md"
+    reqfile.write_text("- [x] https://youtu.be/abc (researched 2026-07-25)\n")
+    arch = tmp_path / "archives"
+    arch.mkdir()
+    (arch / "briefing_2026-07-25_0600.md").write_text(
+        "# AI Briefing\n## S1\nx\n\n## 🔍 Requested Research (included in this issue)\n- https://youtu.be/abc\n"
+    )
+    with patch("panel.app.config.RESEARCH_REQUESTS_PATH", str(reqfile)), \
+         patch("panel.app.config.ARCHIVE_DIR", str(arch)):
+        r = client.get("/research")
+    assert "→ in" in r.text
+    assert "/archive?view=briefing_2026-07-25_0600.md" in r.text

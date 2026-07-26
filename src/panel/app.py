@@ -199,6 +199,16 @@ async def research(request: Request):
         with open(config.RESEARCH_REQUESTS_PATH) as f:
             reqs = researcher.parse_requests(f.read())
     reqs.reverse()  # newest first
+    # Map each completed request to the archive(s) whose research receipt
+    # names it — answers "where did my research end up?" with a link.
+    request_archives: dict[str, list[dict]] = {}
+    for entry in _list_archives():
+        for label in entry["research"]:
+            request_archives.setdefault(label, []).append(entry)
+    for r in reqs:
+        # request text minus the "(researched YYYY-MM-DD)" suffix the flip adds
+        bare = _re.sub(r"\s*\(researched \d{4}-\d{2}-\d{2}\)$", "", r["text"])
+        r["archives"] = request_archives.get(bare, [])
     # AC7 — a reload reattaches to any live job by re-rendering its polling
     # fragment (in-memory registry is the only place the job exists).
     live = next(
@@ -394,6 +404,24 @@ import re as _re
 _ARCHIVE_RE = _re.compile(r"^briefing_(\d{4}-\d{2}-\d{2})_(\d{4}|\d{6})\.md$")
 
 
+_RECEIPT_MARKER = "Requested Research (included in this issue)"
+
+
+def _archive_research_labels(path: str) -> list[str]:
+    """Parse the deterministic research-receipt section from an archive's
+    tail (generator appends it last). Returns [] for archives without one."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - 4096))
+            tail = f.read().decode(errors="replace")
+    except OSError:
+        return []
+    if _RECEIPT_MARKER not in tail:
+        return []
+    lines = tail[tail.index(_RECEIPT_MARKER):].splitlines()
+    return [ln[2:].strip() for ln in lines if ln.startswith("- ")]
+
+
 def _list_archives() -> list[dict]:
     """Newest-first list of full-briefing archives with display labels."""
     entries = []
@@ -404,7 +432,11 @@ def _list_archives() -> list[dict]:
                 continue
             date_part, time_part = m.groups()
             hh, mm = time_part[:2], time_part[2:4]
-            entries.append({"file": fname, "date": date_part, "time": f"{hh}:{mm}"})
+            labels = _archive_research_labels(os.path.join(config.ARCHIVE_DIR, fname))
+            entries.append({
+                "file": fname, "date": date_part, "time": f"{hh}:{mm}",
+                "research": labels,
+            })
     entries.sort(key=lambda e: e["file"], reverse=True)
     return entries
 

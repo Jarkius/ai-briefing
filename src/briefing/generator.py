@@ -494,12 +494,29 @@ def generate(conn, research_findings: str = "") -> dict:
 
     items = fetch_recent_items(conn)
     research_budget_used = len(research_findings)
+    # Requests researched into this issue, for the deterministic receipt
+    # section — Gemini weaves the findings into the body sections, which
+    # reads well but is unrecognizable as "your research" (observed: user
+    # couldn't find their video research in the 2026-07-26 00:44 email).
+    research_labels = [
+        ln[4:].strip() for ln in research_findings.splitlines() if ln.startswith("### ")
+    ]
     items = budget_items(items, extra_budget_used=research_budget_used)
     log(f"Budgeted {len(items)} items into the prompt (research findings: {research_budget_used} chars)")
 
     style = config.load_style()
 
     markdown = call_gemini(items, date_str, style, research_findings=research_findings)
+
+    if research_labels:
+        # Deterministic receipt — appended in code, not left to the LLM, so
+        # the reader can always FIND their research even though the findings
+        # themselves are woven into the sections above. Lands in Part 2
+        # (appended after the last section).
+        receipt = "\n\n## 🔍 Requested Research (included in this issue)\n" + "\n".join(
+            f"- {label}" for label in research_labels
+        ) + "\n"
+        markdown += receipt
 
     part1_md, part2_md = sender.split_two_parts(markdown)
     part1_html = sender.markdown_to_html(part1_md, date_str, title="Daily AI Briefing — Part 1")
