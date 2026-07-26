@@ -74,9 +74,9 @@ def _bind():
     CLAUDE_CLI_MODEL = os.environ.get("CLAUDE_CLI_MODEL", "sonnet")
     # Claude on AWS Bedrock (uses the machine's AWS credentials — same ones
     # Claude Code runs on via CLAUDE_CODE_USE_BEDROCK). Region-prefixed
-    # Bedrock model ID; sonnet-4-5 verified accessible on this account.
+    # Bedrock model ID; Sonnet 5 verified accessible on this account.
     BEDROCK_ENABLED = os.environ.get("BEDROCK_ENABLED", "1").strip().lower() not in ("0", "false", "no")
-    BEDROCK_MODEL = os.environ.get("BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    BEDROCK_MODEL = os.environ.get("BEDROCK_MODEL", "global.anthropic.claude-sonnet-5")
     BEDROCK_REGION = os.environ.get("BEDROCK_REGION", os.environ.get("AWS_REGION", "ap-southeast-1"))
     # Comma-separated provider chain for the Generate phase, tried in order.
     # Known names: bedrock, maxplus, gemini, claude-cli. Unknown names are
