@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from datetime import datetime
 
 from . import config, db, sender
@@ -345,11 +346,17 @@ def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
             last_error = e
             log(f"  Gemini direct failed: {e}")
     if config.CLAUDE_CLI_ENABLED and _claude_cli_available():
-        try:
-            return _claude_cli_call(system, user)
-        except Exception as e:
-            last_error = e
-            log(f"  Claude CLI failed: {e}")
+        # Retries like the API tiers get — this is the LAST tier, so a single
+        # transient blip here kills the whole run (observed 2026-07-26 10:17:
+        # one unexplained exit-1 with every manual repro succeeding).
+        for attempt in range(3):
+            try:
+                return _claude_cli_call(system, user)
+            except Exception as e:
+                last_error = e
+                log(f"  Claude CLI failed (attempt {attempt + 1}/3): {e}")
+                if attempt < 2:
+                    time.sleep(15 * (attempt + 1))
     if last_error is None:
         raise RuntimeError("No AI provider configured: set MAXPLUS_API_KEY or GEMINI_API_KEY")
     raise last_error

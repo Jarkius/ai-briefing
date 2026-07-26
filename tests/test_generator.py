@@ -357,3 +357,32 @@ def test_date_str_avoids_platform_specific_strftime():
     # in generate() legitimately names the forbidden directives.
     offenders = re.findall(r"strftime\([^)]*%[-#]d", src)
     assert offenders == []
+
+
+def test_claude_cli_tier_retries_transient_failures():
+    # The CLI is the LAST tier — a single transient exit-1 must not kill the
+    # whole 5am run (observed 2026-07-26 10:17). Two failures then success.
+    with patch.object(config, "MAXPLUS_API_KEY", ""), \
+         patch.object(config, "GEMINI_API_KEY", ""), \
+         patch.object(config, "CLAUDE_CLI_ENABLED", True), \
+         patch("briefing.generator._claude_cli_available", return_value=True), \
+         patch("briefing.generator._claude_cli_call",
+               side_effect=[RuntimeError("blip 1"), RuntimeError("blip 2"), "recovered"]) as cli, \
+         patch("briefing.generator.time.sleep") as sleep:
+        result = _grok_call("sys", "user")
+
+    assert result == "recovered"
+    assert cli.call_count == 3
+    assert sleep.call_count == 2
+
+
+def test_claude_cli_tier_raises_after_three_failures():
+    with patch.object(config, "MAXPLUS_API_KEY", ""), \
+         patch.object(config, "GEMINI_API_KEY", ""), \
+         patch.object(config, "CLAUDE_CLI_ENABLED", True), \
+         patch("briefing.generator._claude_cli_available", return_value=True), \
+         patch("briefing.generator._claude_cli_call", side_effect=RuntimeError("persistent")), \
+         patch("briefing.generator.time.sleep"):
+        import pytest as _pytest
+        with _pytest.raises(RuntimeError, match="persistent"):
+            _grok_call("sys", "user")
