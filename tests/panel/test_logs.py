@@ -77,3 +77,27 @@ def test_phase_strip_reads_latest_per_phase(tmp_path):
     assert "send: error" in r.text
     assert "(cron)" in r.text
     assert "(dashboard)" in r.text
+
+
+def test_log_tail_highlights_errors_and_wins(tmp_path):
+    log = tmp_path / "briefing.log"
+    log.write_text(
+        "[05:00] === Phase 1: Collect ===\n"
+        "[05:01] Gemini direct call failed (attempt 1/4): HTTP 429\n"
+        "[05:02] retrying in 10s\n"
+        "sent via Gmail API (HTTPS/443)\n"
+    )
+    with patch("panel.app.config.LOG_PATH", str(log)):
+        r = client.get("/logs/tail")
+    assert 'class="ll-err"' in r.text   # the failed line
+    assert 'class="ll-ok"' in r.text    # the sent line
+    assert 'class="ll-warn"' in r.text  # the retry line
+
+
+def test_log_highlight_escapes_html(tmp_path):
+    log = tmp_path / "briefing.log"
+    log.write_text("error: <script>alert(1)</script>\n")
+    with patch("panel.app.config.LOG_PATH", str(log)):
+        r = client.get("/logs/tail")
+    assert "<script>alert(1)</script>" not in r.text
+    assert "&lt;script&gt;" in r.text

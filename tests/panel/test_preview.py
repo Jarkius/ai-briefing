@@ -30,7 +30,7 @@ def teardown_function():
 def test_preview_empty_state_before_any_generation():
     r = client.get("/preview")
     assert r.status_code == 200
-    assert "No generation in this server session" in r.text
+    assert "The presses are quiet" in r.text
     assert "srcdoc" not in r.text
 
 

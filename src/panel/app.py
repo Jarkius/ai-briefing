@@ -516,6 +516,20 @@ def _archive_date_str(date_part: str) -> str:
     return f"{d.strftime('%A, %B')} {d.day}, {d.year}"
 
 
+def _render_archive(fname: str, date_part: str) -> dict:
+    """Re-render an archived markdown into the exact two-part HTML the
+    sender uses, with the ARCHIVE's own date."""
+    with open(os.path.join(config.ARCHIVE_DIR, fname)) as f:
+        markdown = f.read()
+    date_str = _archive_date_str(date_part)
+    p1_md, p2_md = sender.split_two_parts(markdown)
+    return {
+        "part1": sender.markdown_to_html(p1_md, date_str, title="Daily AI Briefing — Part 1"),
+        "part2": sender.markdown_to_html(p2_md, date_str, title="Daily AI Briefing — Part 2"),
+        "date_str": date_str,
+    }
+
+
 @app.get("/archive", response_class=HTMLResponse)
 async def archive_page(request: Request, view: str = ""):
     entries = _list_archives()
@@ -529,19 +543,42 @@ async def archive_page(request: Request, view: str = ""):
     if selected is None and entries:
         selected = entries[0]
     if selected:
-        with open(os.path.join(config.ARCHIVE_DIR, selected["file"])) as f:
-            markdown = f.read()
-        date_str = _archive_date_str(selected["date"])
-        p1_md, p2_md = sender.split_two_parts(markdown)
-        parts = {
-            "part1": sender.markdown_to_html(p1_md, date_str, title="Daily AI Briefing — Part 1"),
-            "part2": sender.markdown_to_html(p2_md, date_str, title="Daily AI Briefing — Part 2"),
-            "date_str": date_str,
-        }
+        parts = _render_archive(selected["file"], selected["date"])
     return templates.TemplateResponse(
         request, "archive.html",
         {"active": "archive", "entries": entries, "selected": selected, "parts": parts},
     )
+
+
+def _archive_send_job(fname: str, date_part: str) -> dict:
+    """Blocking: send an ARCHIVED issue. The dedup pre-check still applies
+    (subject carries the archive's date), so re-sending an already-delivered
+    edition skips rather than duplicating."""
+    parts = _render_archive(fname, date_part)
+    conn = db.connect()
+    try:
+        run_id = db.insert_run(conn, source="dashboard", started_at=datetime.now().isoformat())
+        result = sender.send_two_part_briefing(parts["part1"], parts["part2"], parts["date_str"])
+        ok = all(not str(v).startswith("error") for v in result.values())
+        db.update_run(
+            conn, run_id,
+            send_status="ok" if ok else "error",
+            error_text="" if ok else str(result)[:500],
+        )
+    finally:
+        conn.close()
+    db.record_send_status(fname, result)
+    return result
+
+
+@app.post("/archive/send", response_class=HTMLResponse)
+async def archive_send(view: str = Form(...)):
+    view = os.path.basename(view)
+    entry = next((e for e in _list_archives() if e["file"] == view), None)
+    if entry is None:
+        return HTMLResponse(_banner("err", "unknown archive"))
+    job_id = jobs.submit_sync("send", _archive_send_job, entry["file"], entry["date"])
+    return HTMLResponse(_job_fragment(job_id))
 
 
 # ---- logs ----------------------------------------------------------------------
@@ -578,6 +615,28 @@ async def logs_page(request: Request):
     return templates.TemplateResponse(request, "logs.html", {"active": "logs"})
 
 
+_LOG_ERR_RE = _re.compile(r"error|failed|failure|traceback|exception|refused|reset", _re.I)
+_LOG_OK_RE = _re.compile(r"sent via|Send result.*'sent'|=== Done ===|PASS", _re.I)
+_LOG_WARN_RE = _re.compile(r"retry|falling back|skipp|soft.fail|429|quota", _re.I)
+
+
+def _highlight_log(raw: str) -> str:
+    """Escape then classify each line — errors red, wins green, retries
+    amber — so a failed 5am run is visible at a glance in the tail."""
+    out = []
+    for line in raw.splitlines():
+        esc = html_lib.escape(line)
+        if _LOG_ERR_RE.search(line):
+            out.append(f'<span class="ll-err">{esc}</span>')
+        elif _LOG_OK_RE.search(line):
+            out.append(f'<span class="ll-ok">{esc}</span>')
+        elif _LOG_WARN_RE.search(line):
+            out.append(f'<span class="ll-warn">{esc}</span>')
+        else:
+            out.append(esc)
+    return "\n".join(out)
+
+
 @app.get("/logs/tail", response_class=HTMLResponse)
 async def logs_tail():
     """Cron pane: briefing.log is written by launchd's stdout redirect —
@@ -606,7 +665,7 @@ async def logs_tail():
         f'<table class="sources-table"><thead><tr><th>started</th><th>job</th><th>status</th><th>phase</th></tr></thead>'
         f'<tbody>{jobs_rows}</tbody></table>'
         f'<h2 class="muted">briefing.log (cron) — last 200 lines</h2>'
-        f'<pre class="logtail">{html_lib.escape(tail) or "(no log file yet)"}</pre>'
+        f'<pre class="logtail">{_highlight_log(tail) or "(no log file yet)"}</pre>'
         f'</div>'
     )
 

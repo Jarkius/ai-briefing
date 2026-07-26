@@ -21,8 +21,15 @@
   <iframe class="mail-frame" srcdoc="{{ gen.part2_html | e }}" sandbox=""></iframe>
 </section>
 {% else %}
-<p class="muted">No generation in this server session yet — this tab shows the exact
-in-memory HTML that send uses. Click <strong>Regenerate</strong> to render the current
-DB state, or browse past newsletters in the <a href="/archive">Archive</a> tab.</p>
+<div class="empty-state">
+  <span class="empty-drop">P</span>
+  <div class="empty-copy">
+    <p class="empty-head">The presses are quiet.</p>
+    <p class="muted">Nothing has been typeset this session — this tab shows the exact
+    in-memory HTML that send uses. Hit <strong>Regenerate</strong> to set tonight's
+    edition from the current feed database, or leaf through past editions in the
+    <a href="/archive">Archive</a>.</p>
+  </div>
+</div>
 {% endif %}
 {% endblock %}

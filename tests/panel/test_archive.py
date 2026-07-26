@@ -60,7 +60,7 @@ def test_archive_empty_state(tmp_path):
     empty.mkdir()
     with patch("panel.app.config.ARCHIVE_DIR", str(empty)):
         r = client.get("/archive")
-    assert "No archived briefings yet" in r.text
+    assert "The morgue file is empty" in r.text
 
 
 def test_archive_date_str_is_windows_safe():
@@ -95,7 +95,7 @@ def test_archive_list_shows_send_status(tmp_path):
          patch("panel.app.db.load_send_status", return_value=send_log):
         r = client.get("/archive")
     assert "✉ sent" in r.text          # the emailed one
-    assert "not sent" in r.text        # the never-emailed one
+    assert "draft" in r.text           # the never-emailed one
 
 
 def test_record_and_load_send_status_roundtrip(tmp_path):
@@ -108,3 +108,30 @@ def test_record_and_load_send_status_roundtrip(tmp_path):
         log = bdb.load_send_status()
     assert log["briefing_x.md"]["status"] == "sent"       # already_sent counts as delivered
     assert log["briefing_y.md"]["status"] == "error"
+
+
+def test_archive_send_button_shown_for_draft(tmp_path):
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)), \
+         patch("panel.app.db.load_send_status", return_value={}):
+        r = client.get("/archive")
+    assert "draft" in r.text
+    assert "Send this edition" in r.text
+
+
+def test_archive_send_enqueues_job(tmp_path):
+    from panel import jobs
+
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)), \
+         patch("panel.app.db.load_send_status", return_value={}), \
+         patch("panel.app._archive_send_job", return_value={"part1": "sent", "part2": "sent"}):
+        r = client.post("/archive/send", data={"view": "briefing_2026-07-24_0500.md"})
+    assert 'hx-get="/jobs/' in r.text
+    jobs.JOBS.clear()
+
+
+def test_archive_send_rejects_unknown_file(tmp_path):
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)):
+        r = client.post("/archive/send", data={"view": "../../../etc/passwd"})
+    assert "unknown archive" in r.text

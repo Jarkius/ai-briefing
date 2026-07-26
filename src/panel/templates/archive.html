@@ -2,7 +2,14 @@
 {% block content %}
 <h1>Archive</h1>
 {% if not entries %}
-<p class="muted">No archived briefings yet — they appear here after each generate (scheduled or manual).</p>
+<div class="empty-state">
+  <span class="empty-drop">A</span>
+  <div class="empty-copy">
+    <p class="empty-head">The morgue file is empty.</p>
+    <p class="muted">Every generated edition is archived here — scheduled or manual.
+    Once the first one is set, you'll find it on this shelf.</p>
+  </div>
+</div>
 {% else %}
 <div class="archive-layout">
   <nav class="archive-list">
@@ -10,18 +17,31 @@
     <a href="/archive?view={{ e.file }}"
        class="{{ 'selected' if selected and e.file == selected.file else '' }}">
       <span class="a-date">{{ e.date }}</span>
-      <span class="a-time mono">{{ e.time }}{% if e.research %} <span class="badge-research" title="research: {{ e.research | join(', ') }}">🔍</span>{% endif %}
-        {%- if e.send_status == 'sent' %} <span class="badge-sent" title="emailed {{ e.sent_at }}">✉ sent</span>
-        {%- elif e.send_status == 'error' %} <span class="badge-senderr" title="send failed {{ e.sent_at }}">✉ failed</span>
-        {%- elif e.send_status == 'partial' %} <span class="badge-senderr" title="partially sent {{ e.sent_at }}">✉ partial</span>
-        {%- else %} <span class="badge-unsent" title="never emailed (or predates send tracking)">not sent</span>
-        {%- endif %}</span>
+      <span class="a-time mono">{{ e.time }}</span>
+      <span class="a-badges">
+        {%- if e.send_status == 'sent' %}<span class="badge-sent" title="emailed {{ e.sent_at }}">✉ sent</span>
+        {%- elif e.send_status == 'error' %}<span class="badge-senderr" title="send failed {{ e.sent_at }}">✉ failed</span>
+        {%- elif e.send_status == 'partial' %}<span class="badge-senderr" title="partially sent {{ e.sent_at }}">✉ partial</span>
+        {%- else %}<span class="badge-unsent" title="generated but never emailed — open it and click 'Send this edition'">draft</span>
+        {%- endif %}
+        {%- if e.research %}<span class="badge-research" title="research: {{ e.research | join(', ') }}">🔍</span>{% endif %}
+      </span>
     </a>
     {% endfor %}
   </nav>
   <div class="archive-view">
     {% if parts %}
-    <p class="muted">{{ parts.date_str }} — re-rendered from archived markdown with the archive's own date.</p>
+    <div class="page-head">
+      <p class="muted">{{ parts.date_str }} — re-rendered from archived markdown with the archive's own date.</p>
+      <div class="actions">
+        <form hx-post="/archive/send" hx-target="#banner" hx-swap="innerHTML"
+              hx-confirm="Email this edition ({{ selected.date }} {{ selected.time }}) to the configured recipients?{% if selected.send_status == 'sent' %} It was already sent {{ selected.sent_at }} — the dedup check will skip unless the mailbox says otherwise.{% endif %}">
+          <input type="hidden" name="view" value="{{ selected.file }}">
+          <button type="submit" class="btn-send">{{ 'Send again' if selected.send_status == 'sent' else 'Send this edition' }}</button>
+        </form>
+      </div>
+    </div>
+    <div id="banner"></div>
     <section class="letter">
       <h2>Part 1 · News &amp; Learning</h2>
       <iframe class="mail-frame" srcdoc="{{ parts.part1 | e }}" sandbox=""></iframe>
