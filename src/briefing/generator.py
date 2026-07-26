@@ -335,10 +335,17 @@ def _bedrock_call(system: str, user: str, max_attempts: int) -> str:
     last_error = None
     for attempt in range(max_attempts):
         try:
+            # thinking disabled: Sonnet 5 thinks by default and max_tokens
+            # caps thinking + text TOGETHER — adaptive thinking on a 4000
+            # budget can eat most of it and truncate the section text.
+            # Newsletter sections are mechanical writing; spend the whole
+            # budget on output. (Ignored gracefully by models without the
+            # thinking param support.)
             response = client.messages.create(
                 model=config.BEDROCK_MODEL,
                 max_tokens=4000,
                 system=system,
+                thinking={"type": "disabled"},
                 messages=[{"role": "user", "content": user}],
             )
             text = next((b.text for b in response.content if b.type == "text"), None)
