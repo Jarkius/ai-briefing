@@ -44,8 +44,20 @@ async def index():
 @app.get("/preview", response_class=HTMLResponse)
 async def preview(request: Request):
     gen = state.get_generation()
+    # Pending-work strip: what's waiting to go into (or out of) an edition.
+    pending_requests = []
+    if os.path.exists(config.RESEARCH_REQUESTS_PATH):
+        with open(config.RESEARCH_REQUESTS_PATH) as f:
+            pending_requests = [
+                r["text"] for r in researcher.parse_requests(f.read()) if not r["checked"]
+            ]
+    pending = {
+        "requests": pending_requests,
+        "findings_chars": len(state.LAST_RESEARCH_FINDINGS),
+        "drafts": sum(1 for e in _list_archives() if not e["send_status"]),
+    }
     return templates.TemplateResponse(
-        request, "preview.html", {"active": "preview", "gen": gen}
+        request, "preview.html", {"active": "preview", "gen": gen, "pending": pending}
     )
 
 
@@ -553,8 +565,12 @@ def _render_archive(fname: str, date_part: str) -> dict:
 
 
 @app.get("/archive", response_class=HTMLResponse)
-async def archive_page(request: Request, view: str = ""):
+async def archive_page(request: Request, view: str = "", show: str = "all"):
     entries = _list_archives()
+    if show == "sent":
+        entries = [e for e in entries if e["send_status"] == "sent"]
+    elif show == "drafts":
+        entries = [e for e in entries if not e["send_status"]]
     selected = None
     parts = None
     if view:
@@ -568,7 +584,8 @@ async def archive_page(request: Request, view: str = ""):
         parts = _render_archive(selected["file"], selected["date"])
     return templates.TemplateResponse(
         request, "archive.html",
-        {"active": "archive", "entries": entries, "selected": selected, "parts": parts},
+        {"active": "archive", "entries": entries, "selected": selected,
+         "parts": parts, "show": show},
     )
 
 

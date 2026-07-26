@@ -135,3 +135,21 @@ def test_archive_send_rejects_unknown_file(tmp_path):
     with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)):
         r = client.post("/archive/send", data={"view": "../../../etc/passwd"})
     assert "unknown archive" in r.text
+
+
+def test_archive_filter_chips(tmp_path):
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)   # draft
+    (tmp_path / "briefing_2026-07-25_0600.md").write_text(FULL_MD)   # sent
+    send_log = {"briefing_2026-07-25_0600.md": {"status": "sent", "detail": {}, "at": "2026-07-25T06:01:00"}}
+    ctx = lambda: patch("panel.app.config.ARCHIVE_DIR", str(tmp_path))
+    log_ctx = lambda: patch("panel.app.db.load_send_status", return_value=send_log)
+
+    with ctx(), log_ctx():
+        r = client.get("/archive?show=sent")
+    assert "briefing_2026-07-25_0600.md" in r.text
+    assert "briefing_2026-07-24_0500.md" not in r.text
+
+    with ctx(), log_ctx():
+        r = client.get("/archive?show=drafts")
+    assert "briefing_2026-07-24_0500.md" in r.text
+    assert "briefing_2026-07-25_0600.md" not in r.text

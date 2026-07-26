@@ -4,6 +4,10 @@
 
 <form hx-post="/research/run" hx-target="#banner" hx-swap="innerHTML">
   <textarea name="text" rows="4" placeholder="Paste a YouTube URL, article URL, or topic — one per line. Leave empty to run any unchecked requests."></textarea>
+  <p class="muted" style="font-size:0.78rem; margin:0.4rem 0 0">
+    YouTube URLs are <strong>transcribed locally</strong> (Whisper) — that's the content; expect ~1 min per 20 min of video.
+    Article URLs are fetched and read. If you already have a summary or notes, skip the fetch — use the paste form below instead.
+  </p>
   <div class="actions" style="margin-top:0.6rem">
     <button type="submit">Run research</button>
   </div>

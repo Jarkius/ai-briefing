@@ -247,6 +247,31 @@ textarea, input[type="text"], input[type="password"], input[type="time"], select
   padding: 0.8rem 0 !important; border-bottom: none !important;
 }
 
+.archive-filters { display: flex; gap: 0.4rem; margin: 0.6rem 0 1rem; }
+.filter-chip {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em;
+  color: var(--muted); text-decoration: none;
+  padding: 0.25rem 0.75rem; border: 1px solid var(--hairline-strong); border-radius: 999px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.filter-chip:hover { color: var(--ink); border-color: var(--accent); }
+.filter-chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+.pending-strip {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  margin: 0.8rem 0; padding: 0.6rem 0.9rem;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 5px;
+}
+.pending-title { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted); }
+.pending-chip {
+  font-family: var(--mono); font-size: 0.74rem;
+  color: var(--ink); text-decoration: none;
+  padding: 0.2rem 0.65rem; border: 1px solid var(--hairline-strong); border-radius: 999px;
+}
+a.pending-chip:hover { border-color: var(--accent); color: var(--accent); }
+.pending-chip.is-ready { color: var(--ok); border-color: var(--ok); }
+
 /* archive: date list left, letter view right */
 .archive-layout { display: flex; gap: 1.4rem; align-items: flex-start; }
 .archive-list {

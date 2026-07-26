@@ -120,3 +120,19 @@ def test_regenerate_job_writes_dashboard_runs_row(tmp_path):
     row = conn.execute("SELECT source, generate_status FROM runs").fetchone()
     assert row["source"] == "dashboard"
     assert row["generate_status"] == "ok"
+
+
+def test_preview_shows_pending_strip(tmp_path):
+    reqfile = tmp_path / "research_requests.md"
+    reqfile.write_text("- [ ] pending topic one\n- [x] done already\n")
+    state.LAST_RESEARCH_FINDINGS = "### something\n\nfindings here"
+    try:
+        with patch("panel.app.config.RESEARCH_REQUESTS_PATH", str(reqfile)), \
+             patch("panel.app._list_archives", return_value=[
+                 {"send_status": ""}, {"send_status": "sent"}, {"send_status": ""}]):
+            r = client.get("/preview")
+        assert "1 research request unprocessed" in r.text
+        assert "research findings ready" in r.text
+        assert "2 drafts in the archive" in r.text
+    finally:
+        state.LAST_RESEARCH_FINDINGS = ""

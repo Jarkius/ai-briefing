@@ -10,6 +10,24 @@
 </div>
 <div id="banner"></div>
 
+{% if pending.requests or pending.findings_chars or pending.drafts %}
+<div class="pending-strip">
+  <span class="pending-title">On the desk:</span>
+  {% if pending.requests %}
+  <a href="/research" class="pending-chip" title="{{ pending.requests | join(' · ') }}">
+    {{ pending.requests | length }} research request{{ 's' if pending.requests | length != 1 }} unprocessed</a>
+  {% endif %}
+  {% if pending.findings_chars %}
+  <span class="pending-chip is-ready" title="folds into the next Regenerate">
+    research findings ready ({{ pending.findings_chars }} chars)</span>
+  {% endif %}
+  {% if pending.drafts %}
+  <a href="/archive" class="pending-chip" title="generated but never emailed">
+    {{ pending.drafts }} draft{{ 's' if pending.drafts != 1 }} in the archive</a>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if gen %}
 <p class="muted">Generated {{ gen.date_str }} — exactly what sender would email (same in-memory HTML).</p>
 <section class="letter">
