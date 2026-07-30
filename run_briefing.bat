@@ -16,13 +16,17 @@ for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') d
 echo ============================================== >> "logs\briefing_%STAMP%.log"
 echo Run started %DATE% %TIME% >> "logs\briefing_%STAMP%.log"
 
-REM Prefer the Python launcher; fall back to python on PATH
-where py >nul 2>&1
-if %ERRORLEVEL%==0 (
-    py -3 ai_briefing.py >> "logs\briefing_%STAMP%.log" 2>&1
-) else (
-    python ai_briefing.py >> "logs\briefing_%STAMP%.log" 2>&1
+REM Requires the project venv created by setup.sh (or an equivalent manual
+REM venv — see README Windows section for bootstrap steps). This runs the
+REM new run.py orchestrator, not the legacy ai_briefing.py.
+if not exist ".venv\Scripts\python.exe" (
+    echo ERROR: .venv\Scripts\python.exe not found. Create the venv first ^(see README Windows section^): >> "logs\briefing_%STAMP%.log"
+    echo   py -3.11 -m venv .venv >> "logs\briefing_%STAMP%.log"
+    echo   .venv\Scripts\pip install -e . >> "logs\briefing_%STAMP%.log"
+    exit /b 1
 )
+
+".venv\Scripts\python.exe" run.py >> "logs\briefing_%STAMP%.log" 2>&1
 set RC=%ERRORLEVEL%
 
 echo Run finished %DATE% %TIME% with exit code %RC% >> "logs\briefing_%STAMP%.log"

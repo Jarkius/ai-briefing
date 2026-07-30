@@ -1,213 +1,218 @@
 # Daily AI Briefing
 
-Automated daily AI news briefing system that fetches AI news, research, tools, and trends from multiple sources, generates a comprehensive briefing using Gemini, and delivers it via email.
-
-## Features
-
-- **Multi-source aggregation**: HackerNews, RSS feeds, GitHub trending, arXiv papers
-- **Smart deduplication**: Tracks seen items for 7 days to avoid repeats
-- **AI-powered curation**: Uses Gemini to generate 10-section briefings covering news, learning, security, ethics, and more
-- **Dual email delivery**: Splits into "News & Learning" and "Technical & Community" emails
-- **Markdown archives**: Saves timestamped briefings for historical tracking
-- **Educational focus**: Emphasizes prompt engineering, security best practices, tutorials, and AI awareness
+Automated daily AI briefing: collects from a zero-API-key MCP feed layer
+(RSS, HackerNews, arXiv, YouTube — with automatic transcription), summarizes
+with Gemini (via maxplus), and delivers as a two-part HTML email.
 
 ## Architecture
 
 ```
-Sources → Fetch & Filter → Gemini API → Format → Email + Archive
-  ↓           ↓               ↓           ↓           ↓
-HN, RSS,   Dedup Cache    10 Sections  HTML/MD    Gmail SMTP
-GitHub,    (7 days)       Generated    Split      + Local MD
-arXiv
+subscriptions.json ──▶ collector.py ──▶ data/feeds.db (SQLite + FTS5)
+                              │               ▲
+research_requests.md ──▶ researcher.py ───────┘
+                                                │
+newsletter_style.md ──▶ generator.py ◀─────────┘
+                              │
+                              ▼
+                    sender.py (SMTP + IMAP dedup)
+                              │
+                              ▼
+                    archives/*.md + 2 emails
 ```
+
+- **`collector.py`** — reconciles `subscriptions.json` against the vendored
+  MCP server's subscription table, then runs `check_feeds` (auto-transcribes
+  new YouTube videos, capped at 2 videos / 30 min each per run so a big
+  backlog can't block a daily run).
+- **`researcher.py`** — processes pasted requests in `research_requests.md`
+  (a topic, article URL, or YouTube link per line), routing to
+  `transcribe_video` / `visit_page` / `search_feeds` + best-effort
+  `google_search`.
+- **`generator.py`** — budgets recent DB items into a Gemini prompt (hard
+  60k-char cap, 8k-char/transcript cap, priority-based dropping), appends
+  `newsletter_style.md` verbatim, produces two HTML bodies.
+- **`sender.py`** — SMTP send with an IMAP pre-check so a second run (or a
+  second computer) never double-sends the same day's briefing.
+- **`run.py`** — orchestrates collect → research → generate → send, each
+  phase failing soft so one broken source never blocks delivery.
+
+See `.omc/plans/2026-07-22-mcp-integration.md` for the full design.
 
 ## Setup
 
 ### Prerequisites
 
-- Python 3.8+
-- Gmail account with App Password enabled
-- Gemini API access (via maxplus-ai.cc or official endpoint)
+- Python 3.11 or 3.12 (the vendored MCP server pins `rapidocr-onnxruntime<3.13`)
+- [`uv`](https://docs.astral.sh/uv/)
+- Gmail account with an App Password
+- A maxplus-ai.cc (or compatible) API key
+
+### Install
+
+```bash
+./setup.sh
+```
+
+Builds `.venv` (Python 3.11), installs this project plus the vendored
+`noapi-google-search-mcp` fork (pinned by commit SHA — see `setup.sh`), and
+installs Playwright's Chromium.
 
 ### Configuration
-
-Copy `.env.example` to `.env` next to the script and fill in your values:
 
 ```bash
 cp .env.example .env
 ```
 
 ```dotenv
-MAXPLUS_API_KEY=ccsk-your-api-key-here
 GEMINI_API_KEY=your-google-gemini-api-key   # optional fallback #1
+MAXPLUS_API_KEY=ccsk-your-api-key-here
+MAXPLUS_MODEL=gemini-3.5-flash        # check your maxplus pool's available models
 GMAIL_ADDRESS=your-email@gmail.com
 GMAIL_APP_PASSWORD=your-app-password
 RECIPIENT_EMAIL=recipient@gmail.com   # optional, defaults to GMAIL_ADDRESS
 ```
 
-The `.env` file is gitignored — never commit real credentials.
+`.env` is gitignored — never commit real credentials.
 
-### Installation
+### Sources
 
-```bash
-# Clone the repository
-git clone <your-repo-url>
-cd ai-briefing
-
-# No additional dependencies needed (uses stdlib only)
-```
+Edit `subscriptions.json` to add/remove feeds. Supported `source_type`
+values: `news`, `reddit`, `hackernews`, `github`, `arxiv`, `youtube`,
+`podcast`, `twitter`. See the vendored server's `subscribe` tool docstring
+for identifier formats per type.
 
 ## Usage
 
-### Manual Run
-
 ```bash
-python3 ai_briefing.py
+.venv/bin/python run.py              # full run, sends email
+.venv/bin/python run.py --dry-run    # full run, prints instead of sending
 ```
 
-### Scheduled Run (macOS/Linux)
+### Pasting research requests
 
-The briefing can be scheduled using:
-- **Claude Code scheduled tasks** (recommended): Runs at 10:00 AM daily with hybrid mode
-- **Cron**: Add to crontab
-- **Launchd**: macOS launch agent
+Add a line to `research_requests.md`:
 
-#### Claude Code Scheduled Task
+```markdown
+- [ ] https://www.youtube.com/watch?v=...
+- [ ] https://some-article.example.com/post
+- [ ] Kimi K3 benchmark results
+```
 
-The project includes a scheduled task configured to run daily at 10:00 AM with hybrid mode:
+The next `run.py` invocation researches each and folds findings into the
+newsletter, checking off completed lines with a date.
 
-1. **Primary mode**: Runs the Python script for fast, automated delivery
-2. **Fallback mode**: If network restrictions block the script, uses web search to compile the briefing
+### Refining newsletter style
 
-To enable:
-1. Open Claude Code
-2. Navigate to Scheduled Tasks
-3. Find "daily-ai-awareness-briefing"
-4. Click "Run now" once to pre-approve permissions
+Edit `newsletter_style.md` — its contents are appended verbatim to every
+Gemini prompt, so style changes take effect on the next run without touching
+code.
+
+### Scheduling (launchd, macOS)
+
+```bash
+cp com.user.ai-briefing.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.user.ai-briefing.plist
+```
+
+Runs daily at 06:00. Logs to `briefing.log` / `briefing_error.log`.
 
 ### Scheduled Run (Windows)
 
 Use Windows Task Scheduler with the included wrapper scripts:
 
 1. Copy `.env.example` to `.env` and fill in your credentials (see Configuration above).
-2. Right-click `setup_task.bat` → **Run as administrator**. This registers a daily task
+2. Create the venv and install the project (there's no Windows equivalent of `setup.sh`
+   yet — run these manually from a `cmd`/PowerShell prompt in the repo root):
+   ```bat
+   py -3.11 -m venv .venv
+   .venv\Scripts\pip install -e .
+   ```
+   (The vendored `noapi-google-search-mcp` fork and Playwright's Chromium — see
+   `setup.sh` — are only required for the collector/researcher phases; install them
+   the same way if you run those on Windows too.)
+3. Right-click `setup_task.bat` → **Run as administrator**. This registers a daily task
    (`\ai\AI Briefing Daily`) that runs `run_briefing.bat`, which in turn calls
-   `ai_briefing.py` and logs output to `logs\briefing_YYYY-MM-DD.log`.
-3. If the task needs to survive screen lock/logoff, or run on battery, use
+   `.venv\Scripts\python.exe run.py` and logs output to `logs\briefing_YYYY-MM-DD.log`.
+4. If the task needs to survive screen lock/logoff, or run on battery, use
    `fix_task_settings.ps1` (run from an elevated PowerShell prompt) to switch the task's
    power/logon settings.
 
-**Email delivery on corporate networks:** if a proxy/DLP agent (e.g. Netskope) blocks
-outbound Gmail SMTP, `ai_briefing.py` automatically falls back to sending via a local
-Outlook client through PowerShell COM automation. This fallback requires Outlook to be
-installed and an interactive desktop session — it will not work if the scheduled task
-is set to "Run whether user is logged on or not."
+**Email delivery on corporate networks:** the current pipeline (`src/briefing/sender.py`)
+only sends via Gmail SMTP (trying port 465, then falling back to 587 — see
+"Gmail SMTP errors" below). The legacy `ai_briefing.py` had an Outlook COM automation
+fallback for networks where a proxy/DLP agent (e.g. Netskope) blocks outbound SMTP; that
+fallback has not been ported to the new pipeline. If you're on such a network, outbound
+Gmail SMTP must be reachable for scheduled sends to succeed.
 
-## Briefing Sections
+## Two-computer workflow
 
-1. 🔥 **Top 3 Stories This Briefing** - Most impactful items
-2. 📰 **AI News & Headlines** - Latest announcements and developments
-3. 🏛️ **AI Governance & Policy** - Regulations, compliance, enterprise AI
-4. 🧠 **AI Mindset & Culture** - How teams are adopting AI
-5. 📚 **AI Learning & Best Practices** - Tutorials, workflows, techniques
-6. 🎯 **Prompt Engineering Tips** - Effective prompting strategies
-7. 🔒 **AI Security & Privacy** - Vulnerabilities, data protection
-8. ⚖️ **AI Ethics & Responsible Use** - Fairness, bias, safety
-9. 🔬 **AI Research & Emerging Capabilities** - Papers, breakthroughs
-10. 💻 **Useful AI Tools & Resources** - GitHub repos, frameworks
-11. 💬 **Community Conversations** - HackerNews/Reddit discussions
+This repo is used from two Macs. Always work on a feature branch, never
+commit directly to `main`. `data/` (the local feeds DB) and `.venv/` are
+gitignored per-machine state — `subscriptions.json`, `newsletter_style.md`,
+and `research_requests.md` are the git-tracked files that sync your
+configuration and in-flight research between machines.
 
-## Data Sources
+## Legacy
 
-### RSS Feeds
-- TechCrunch AI
-- VentureBeat AI
-- Ars Technica
-- AI News
-- MarkTechPost (ML research & tutorials)
-- Google AI Blog
-- Hugging Face Blog
-- PyTorch Blog
-- DeepLearning.AI - The Batch
-- HackerNews AI RSS (hnrss.org)
-- arXiv Machine Learning papers
+`legacy/ai_briefing.py` and `legacy/ai_briefing_v2.py` are the original
+single-file implementations (hand-rolled fetchers, no database), kept for
+reference — nothing is deleted. See `docs/poc-noapi-google-search-mcp.md`
+for why the MCP-based collector replaced them.
 
-### APIs
-- HackerNews Firebase API
-- GitHub API (trending repos)
+## Gmail API fallback (networks that block SMTP/IMAP)
 
-### Disabled Sources
-- Reddit (blocked by 403 without OAuth)
-- Twitter/X (Nitter unreliable)
-- ProductHunt (scraping fragile)
+Some networks only allow outbound HTTPS (port 443) and block the raw
+SMTP/IMAP protocol ports (465/587/993) — confirmed on at least one office
+network this project runs on: TLS handshakes to `smtp.gmail.com` /
+`imap.gmail.com` reset consistently there, while HTTPS to Google works fine.
 
-## Output
+`sender.py` tries SMTP first (no setup needed, works on most networks) and
+automatically falls back to the Gmail API over HTTPS if SMTP fails and the
+fallback is configured. Setup is one-time and needs a real browser login
+(this can't be scripted around — Google requires an explicit consent click):
 
-### Email
-Two HTML emails sent daily:
-1. **Part 1: News & Learning** - Top stories, news, governance, mindset, learning, prompts
-2. **Part 2: Technical & Community** - Security, ethics, research, tools, community
+```bash
+.venv/bin/python scripts/setup_gmail_oauth.py
+```
 
-### Archives
-Markdown files saved to `archives/`:
-- `briefing_YYYY-MM-DD_HHMM_part1_news.md` (when script succeeds)
-- `briefing_YYYY-MM-DD_HHMM_part2_technical.md` (when script succeeds)
-- `briefing_YYYY-MM-DD_HHMM_websearch.md` (fallback mode, single file)
+The script prints exact URLs for creating a Google Cloud project + OAuth
+"Desktop app" credentials, then opens a browser for the consent screen and
+saves a refresh token to `data/gmail_oauth_token.json` (gitignored,
+per-machine — never commit it). After that, `run.py` uses it automatically
+whenever SMTP fails; no `.env` changes needed.
 
-### Cache
-`.seen_cache.json` - Tracks URLs from last 7 days to prevent duplicates
+On Windows, the fallback chain is SMTP → Outlook COM automation instead
+(requires a local Outlook install) — the Gmail API fallback only applies on
+macOS/Linux where there's no Outlook to fall back to.
 
 ## Troubleshooting
 
-### 403 Forbidden Errors
-- **Network restrictions in Claude Code scheduled tasks**: The Python script may encounter 403 errors when fetching from external sources (HackerNews, RSS feeds, GitHub) due to sandbox network policies
-- **Fallback mode**: The scheduled task automatically switches to web search mode if the script fails, compiling the briefing from search results instead
-- **Manual workaround**: Run the script from your local terminal (not Claude Code sandbox) to bypass network restrictions
-- Check that RSS feeds haven't changed URLs
-- Verify Gemini API key is valid
-- Ensure network allows outbound HTTPS
+### Gemini returns HTTP 400 "model not available"
+The maxplus pool's available models change over time. The 400 response body
+lists currently valid model names — update `MAXPLUS_MODEL` in `.env`.
+Likewise, `gemini-3.5-flash` was never a real Gemini model name (verified
+against the API's own model list) — use `GEMINI_MODEL=gemini-flash-latest`
+or another name from `https://generativelanguage.googleapis.com/v1beta/models`.
 
-### No New Items After Dedup
-- Normal if run multiple times per day
-- Cache clears items older than 7 days automatically
-- Delete `.seen_cache.json` to force full fetch (testing only)
+### Gmail SMTP/IMAP errors, or "Connection reset by peer"
+Enable 2FA on the Gmail account and use an App Password, not the regular
+password. If the error is specifically a connection reset (not an auth
+failure) and persists across retries, the network is likely blocking the
+SMTP/IMAP protocol ports — see "Gmail API fallback" above.
 
-### Gmail SMTP Errors
-- Enable 2FA on Gmail account
-- Generate App Password (not regular password)
-- Check SMTP isn't blocked by firewall
+### A leftover shell environment variable overrides `.env`
+`MAXPLUS_API_KEY` in particular is also used by unrelated dev tooling (e.g.
+some Claude Code shell configs export it globally). `config.py`'s `.env`
+loader overrides ambient shell exports for every key it reads, so a value
+set in `.env` (including intentionally commenting a key out) always wins —
+but this only applies to processes that actually load `.env` via
+`config.py`; a raw `echo $MAXPLUS_API_KEY` in your shell will still show
+whatever's exported there, which is expected and harmless.
 
-### Syntax Errors in Python Script
-- **Fixed in commit 24c7305**: Removed duplicate section header that caused `SyntaxError: invalid character '⭐'`
-- If you encounter similar errors, check for duplicate triple-quoted strings in the `call_ai()` function
-
-## Customization
-
-### Change Email Schedule
-Edit the Claude Code scheduled task or modify cron schedule.
-
-### Add/Remove Sources
-Edit `RSS_FEEDS` list in `ai_briefing.py`.
-
-### Adjust Deduplication Window
-Change `CACHE_MAX_AGE_DAYS` constant (default: 7 days).
-
-### Modify Briefing Sections
-Edit the 6 Gemini API calls in `main()` to change section focus.
-
-## License
-
-MIT
-
-## Contributing
-
-Pull requests welcome! Please ensure:
-- Code follows existing style
-- RSS feeds are tested and working
-- Deduplication logic preserved
-- Email formatting remains clean
-
-## Author
-
-Created for AI awareness newsletter and daily briefing automation.
-# ai-briefing
+### `data/.mcp.lock` seems stuck
+The lock (`fcntl.flock`) releases automatically when its holding process
+exits, including on crash or kill — it cannot outlive the process that took
+it. If `run.py` reports the collector was skipped due to the lock, another
+process (a manual `collector.py`/`researcher.py` run, or the dashboard) was
+using the MCP server at that moment; the run still completes using whatever
+was already in `data/feeds.db`.

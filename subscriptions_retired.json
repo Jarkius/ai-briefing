@@ -1,0 +1,25 @@
+{
+  "retired_on": "2026-07-25",
+  "reason": {
+    "AI News": "Feed 403s bot UAs (works only with curl-level browser headers); WAF-blocked for urllib regardless of UA string",
+    "MarkTechPost": "Same WAF 403 behavior as AI News",
+    "DeepLearning.AI — The Batch": "Feed URL 404; no working public RSS endpoint found (site moved The Batch to JS-rendered pages)"
+  },
+  "entries": [
+    {
+      "source_type": "news",
+      "identifier": "https://www.artificialintelligence-news.com/feed/",
+      "name": "AI News"
+    },
+    {
+      "source_type": "news",
+      "identifier": "https://www.marktechpost.com/feed/",
+      "name": "MarkTechPost"
+    },
+    {
+      "source_type": "news",
+      "identifier": "https://www.deeplearning.ai/the-batch/rss/",
+      "name": "DeepLearning.AI — The Batch"
+    }
+  ]
+}

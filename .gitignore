@@ -1,11 +1,15 @@
 # Cache and temporary files
 .seen_cache.json
 
-# Secrets — never commit
+# Secrets — never commit (.env.* catches backups like .env.bak-YYYY-MM-DD,
+# which hold the same live credentials and once nearly reached `git add -A`)
 .env
+.env.*
+!.env.example
 
-# Email credentials (if stored separately)
-config.py
+# Email credentials (if stored separately) — root-level only;
+# src/briefing/config.py is code (env reads, no secrets) and IS tracked
+/config.py
 credentials.json
 
 # Runtime logs and debug output
@@ -25,6 +29,11 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
+
+# Local database + runtime state (per-machine, not synced)
+data/
+archive/test-runs/
 
 # IDE
 .vscode/
@@ -41,3 +50,4 @@ Thumbs.db
 
 # Archives (optional - uncomment if you don't want to track briefing history)
 # archives/
+.team/
