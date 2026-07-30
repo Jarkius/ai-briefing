@@ -76,6 +76,8 @@ def main():
                 )
                 log(f"Send result: {send_result}")
                 send_status = str(send_result)
+                if result.get("archive_file"):
+                    db.record_send_status(result["archive_file"], send_result)
             except Exception as e:
                 log(f"Send phase failed: {e}")
                 send_status = f"error: {e}"

@@ -480,14 +480,21 @@ def send_two_part_briefing(part1_html: str, part2_html: str, date_str: str) -> d
     }
     htmls = {"part1": part1_html, "part2": part2_html}
 
-    for part, subject in subjects.items():
-        marker = subject.split(" — ")[0]  # e.g. "🤖 AI Briefing Part 1: News & Learning"
-        try:
-            if already_sent_today(marker):
-                result[part] = "already_sent"
-                continue
-            send_email(subject, htmls[part])
-            result[part] = "sent"
-        except Exception as e:
-            result[part] = f"error: {e}"
+    # The dedup check-then-send is check-then-act: a cron send and a panel
+    # send of the same subject inside the mailbox-visibility window (~1-5s)
+    # could both pass the check and double-deliver. db.send_lock serializes
+    # same-machine senders; cross-machine dedup remains the mailbox itself.
+    from . import db
+
+    with db.send_lock():
+        for part, subject in subjects.items():
+            marker = subject.split(" — ")[0]  # e.g. "🤖 AI Briefing Part 1: News & Learning"
+            try:
+                if already_sent_today(marker):
+                    result[part] = "already_sent"
+                    continue
+                send_email(subject, htmls[part])
+                result[part] = "sent"
+            except Exception as e:
+                result[part] = f"error: {e}"
     return result

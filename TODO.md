@@ -37,14 +37,16 @@ Code-complete; acceptance bar not fully met.
 
 ## Control panel (`.omc/plans/2026-07-22-control-panel.md`)
 
-Not started beyond scaffolding — `src/panel/` has only empty `__init__.py`, `static/`, `templates/`.
+**v1 BUILT 2026-07-25** on branch `feat/control-panel` (stories S1–S6 in `.omc/plans/2026-07-25-control-panel-stories.md`; commits 5f30674…9914b8e). 136 tests green; all 7 tabs live-verified on :8787.
 
-- [ ] FastAPI app + routes (preview, research/run, sources, style, schedule, settings, logs)
-- [ ] Jinja + htmx templates
-- [ ] `panel.sh` launcher (127.0.0.1:8787, on-demand)
-- [ ] Cross-process `data/.mcp.lock` (flock) between dashboard and cron run
-- [ ] In-process job registry (research/regenerate survive tab close)
-- [ ] Auto-commit on dashboard saves (push stays manual)
+- [x] FastAPI app + routes (preview, research/run, sources, style, schedule, settings, logs)
+- [x] Jinja + htmx templates + dark editorial CSS base
+- [x] `panel.sh` launcher (127.0.0.1:8787, on-demand; test pins the bind)
+- [x] Cross-process `data/.mcp.lock` — research job acquires inside the task; route pre-rejects via is_locked()
+- [x] In-process job registry — blocking core work via asyncio.to_thread (loop-not-blocked test); research reattaches on reload (AC7)
+- [x] Auto-commit on dashboard saves — pathspec-restricted, never bare; push stays manual
+- [ ] Remaining ACs needing manual/live proof: AC2 (LAN curl from second machine), AC5 (IMAP before/after send count), AC6 (real YouTube research run), AC7/AC8 (kill-tab / kill-server)
+- [ ] S6 polish backlog: full letter-texture theme pass (base theme shipped), run-history table (deferred by plan)
 
 ## Housekeeping
 - [ ] Branch: work is on `poc/noapi-google-search-mcp`; plans say implement on `feat/mcp-collector` — decide whether to rename/branch before PR to `main`

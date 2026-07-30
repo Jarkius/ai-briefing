@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Briefing — Control Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,900;1,9..144,400&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/panel.css">
+<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+<header class="topbar">
+  <div class="masthead">
+    <span class="brand">The&nbsp;Briefing<span class="brand-mark">•</span></span>
+    <span class="tagline">nightly desk — curated by machine, read by you</span>
+  </div>
+  <nav aria-label="sections">
+    {% for tab in ["preview", "archive", "research", "style", "sources", "schedule", "settings", "logs"] %}
+    <a href="/{{ tab }}" class="{{ 'active' if active == tab else '' }}">{{ tab }}</a>
+    {% endfor %}
+  </nav>
+  <span id="status-dot" class="dot dot-idle" hx-get="/status" hx-trigger="load, every 3s" hx-swap="outerHTML">●</span>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

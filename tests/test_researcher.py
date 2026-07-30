@@ -176,3 +176,38 @@ def test_research_one_refuses_private_url_without_calling_tool():
 def test_ssrf_guard_allows_public_ip():
     # 1.1.1.1 is a literal global IP — no DNS needed
     assert _public_url_error("https://1.1.1.1/") is None
+
+
+def test_run_pending_preserves_lines_appended_mid_run(tmp_path, monkeypatch):
+    # hunt-data #4: cron wrote back its start-of-run snapshot, erasing
+    # requests the panel appended while research was in flight.
+    import asyncio
+
+    from briefing import config as bconfig
+    from briefing import researcher
+
+    reqfile = tmp_path / "research_requests.md"
+    reqfile.write_text("- [ ] first topic\n")
+    monkeypatch.setattr(bconfig, "RESEARCH_REQUESTS_PATH", str(reqfile))
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+    async def fake_research_one(session, text, phase_cb=None):
+        # mid-research, the panel appends a new request
+        with open(reqfile, "a") as f:
+            f.write("- [ ] appended while running\n")
+        return f"### {text}\n\nfindings"
+
+    monkeypatch.setattr(researcher.mcp_client, "McpSession", FakeSession)
+    monkeypatch.setattr(researcher, "research_one", fake_research_one)
+
+    findings, count = asyncio.run(researcher.run_pending_async())
+    content = reqfile.read_text()
+    assert count == 1
+    assert "- [x] first topic (researched" in content   # processed one flipped
+    assert "- [ ] appended while running" in content    # concurrent append SURVIVES

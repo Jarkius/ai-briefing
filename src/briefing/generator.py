@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from datetime import datetime
 
 from . import config, db, sender
@@ -314,40 +315,126 @@ def _claude_cli_call(system: str, user: str) -> str:
             timeout=300,
         )
     if result.returncode != 0:
-        raise RuntimeError(f"claude -p exited {result.returncode}: {result.stderr.strip()}")
+        # The CLI reports usage-limit/auth errors on STDOUT with an empty
+        # stderr — observed 2026-07-26: "exited 1: " told us nothing and hid
+        # the real reason the 5am fallback died. Include both streams.
+        detail = (result.stderr.strip() or result.stdout.strip())[:300]
+        raise RuntimeError(f"claude -p exited {result.returncode}: {detail}")
     if not result.stdout.strip():
         raise RuntimeError("claude -p returned empty output")
     return result.stdout.strip()
 
 
-def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
-    """Provider chain: maxplus first (if MAXPLUS_API_KEY is set), then the
-    direct Gemini API (if GEMINI_API_KEY is set), then the local Claude CLI
-    (if enabled and installed) as the final safety net. API tiers come
-    first since they're faster and don't consume the interactive Claude
-    session pool. Each tier logs its failure and falls through; raises the
-    last provider's error if every configured tier fails."""
+def _bedrock_call(system: str, user: str, max_attempts: int) -> str:
+    """Claude on AWS Bedrock, authenticated via the machine's AWS credentials
+    (same chain Claude Code uses under CLAUDE_CODE_USE_BEDROCK). Lazy import:
+    the anthropic SDK is only needed when this tier is enabled and reached."""
+    from anthropic import AnthropicBedrock
+
+    # Hard per-request ceiling: the SDK's defaults (600s read timeout ×
+    # 2 internal retries) under OUR 4-attempt loop meant a hanging (not
+    # erroring) connection could stall one section call for ~2h and the 5am
+    # run for ~4h, never reaching Send. A newsletter section takes ~5-30s;
+    # 120s is generous. SDK retries off — this function owns retrying.
+    client = AnthropicBedrock(
+        aws_region=config.BEDROCK_REGION, timeout=120.0, max_retries=0
+    )
     last_error = None
-    if config.MAXPLUS_API_KEY:
+    for attempt in range(max_attempts):
         try:
-            return _maxplus_call(system, user, max_attempts)
+            # thinking disabled: Sonnet 5 thinks by default and max_tokens
+            # caps thinking + text TOGETHER — adaptive thinking on a 4000
+            # budget can eat most of it and truncate the section text.
+            # Newsletter sections are mechanical writing; spend the whole
+            # budget on output. (Ignored gracefully by models without the
+            # thinking param support.)
+            response = client.messages.create(
+                model=config.BEDROCK_MODEL,
+                max_tokens=4000,
+                system=system,
+                thinking={"type": "disabled"},
+                messages=[{"role": "user", "content": user}],
+            )
+            text = next((b.text for b in response.content if b.type == "text"), None)
+            if not text:
+                raise ValueError("Bedrock response contained no text block")
+            return text
         except Exception as e:
+            # Auth/permission/validation errors are deterministic — fail fast
+            # to the next provider instead of burning the backoff budget.
+            name = type(e).__name__
+            if name in ("PermissionDeniedError", "AuthenticationError", "BadRequestError", "NotFoundError"):
+                log(f"  Bedrock call failed fast: {name}: {str(e)[:200]}")
+                raise
             last_error = e
-            log(f"  maxplus unavailable ({e}) — falling back to Gemini direct…")
-    if config.GEMINI_API_KEY:
-        try:
-            return _gemini_call(system, user, max_attempts)
-        except Exception as e:
-            last_error = e
-            log(f"  Gemini direct failed: {e}")
-    if config.CLAUDE_CLI_ENABLED and _claude_cli_available():
+            log(f"  Bedrock call failed (attempt {attempt + 1}/{max_attempts}): {name}: {str(e)[:200]}")
+            if attempt < max_attempts - 1:
+                time.sleep(10 * (2 ** attempt))
+    raise last_error
+
+
+def _claude_cli_tier(system: str, user: str, max_attempts: int) -> str:
+    """Claude CLI with retries — often the LAST tier, so a single transient
+    blip here kills the whole run (observed 2026-07-26 10:17)."""
+    last_error = None
+    for attempt in range(3):
         try:
             return _claude_cli_call(system, user)
         except Exception as e:
             last_error = e
-            log(f"  Claude CLI failed: {e}")
-    if last_error is None:
-        raise RuntimeError("No AI provider configured: set MAXPLUS_API_KEY or GEMINI_API_KEY")
+            log(f"  Claude CLI failed (attempt {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(15 * (attempt + 1))
+    raise last_error
+
+
+def _provider_available(name: str) -> bool:
+    if name == "bedrock":
+        return config.BEDROCK_ENABLED
+    if name == "maxplus":
+        return bool(config.MAXPLUS_API_KEY)
+    if name == "gemini":
+        return bool(config.GEMINI_API_KEY)
+    if name == "claude-cli":
+        return config.CLAUDE_CLI_ENABLED and _claude_cli_available()
+    return False
+
+
+# Names, not references — resolved via globals() at call time so the
+# functions stay late-bound (test monkeypatching, future hot-reload).
+_PROVIDER_CALLS = {
+    "bedrock": "_bedrock_call",
+    "maxplus": "_maxplus_call",
+    "gemini": "_gemini_call",
+    "claude-cli": "_claude_cli_tier",
+}
+
+
+def _grok_call(system: str, user: str, max_attempts: int = 4) -> str:
+    """Provider chain, ordered by config.PROVIDER_ORDER (editable in .env /
+    the panel's Settings tab — default: bedrock, gemini, maxplus, claude-cli).
+    Each configured+available tier is tried in order; failures log and fall
+    through; raises the last provider's error if every tier fails."""
+    last_error = None
+    tried_any = False
+    for name in config.PROVIDER_ORDER:
+        if name not in _PROVIDER_CALLS:
+            log(f"  unknown provider '{name}' in PROVIDER_ORDER — skipping")
+            continue
+        if not _provider_available(name):
+            continue
+        tried_any = True
+        try:
+            return globals()[_PROVIDER_CALLS[name]](system, user, max_attempts)
+        except Exception as e:
+            last_error = e
+            log(f"  provider '{name}' failed: {e}")
+    if not tried_any or last_error is None:
+        raise RuntimeError(
+            "No AI provider available: configure one of PROVIDER_ORDER "
+            f"({', '.join(config.PROVIDER_ORDER)}) — set an API key, enable "
+            "Bedrock (AWS credentials), or install the claude CLI"
+        )
     raise last_error
 
 
@@ -490,12 +577,29 @@ def generate(conn, research_findings: str = "") -> dict:
 
     items = fetch_recent_items(conn)
     research_budget_used = len(research_findings)
+    # Requests researched into this issue, for the deterministic receipt
+    # section — Gemini weaves the findings into the body sections, which
+    # reads well but is unrecognizable as "your research" (observed: user
+    # couldn't find their video research in the 2026-07-26 00:44 email).
+    research_labels = [
+        ln[4:].strip() for ln in research_findings.splitlines() if ln.startswith("### ")
+    ]
     items = budget_items(items, extra_budget_used=research_budget_used)
     log(f"Budgeted {len(items)} items into the prompt (research findings: {research_budget_used} chars)")
 
     style = config.load_style()
 
     markdown = call_gemini(items, date_str, style, research_findings=research_findings)
+
+    if research_labels:
+        # Deterministic receipt — appended in code, not left to the LLM, so
+        # the reader can always FIND their research even though the findings
+        # themselves are woven into the sections above. Lands in Part 2
+        # (appended after the last section).
+        receipt = "\n\n## 🔍 Requested Research (included in this issue)\n" + "\n".join(
+            f"- {label}" for label in research_labels
+        ) + "\n"
+        markdown += receipt
 
     part1_md, part2_md = sender.split_two_parts(markdown)
     part1_html = sender.markdown_to_html(part1_md, date_str, title="Daily AI Briefing — Part 1")
@@ -522,6 +626,9 @@ def generate(conn, research_findings: str = "") -> dict:
         "part2_html": part2_html,
         "date_str": date_str,
         "today": today,
+        # Basename of the full-markdown archive this generation wrote —
+        # the key send paths use to record per-issue send status.
+        "archive_file": os.path.basename(archive_path),
     }
 
 

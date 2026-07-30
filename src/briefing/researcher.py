@@ -145,8 +145,8 @@ async def run_pending_async(phase_cb=None) -> tuple[str, int]:
     if not requests:
         return "", 0
 
-    lines = text.splitlines()
     findings_blocks = []
+    processed_texts = []
     today = datetime.now().strftime("%Y-%m-%d")
 
     async with mcp_client.McpSession() as session:
@@ -154,10 +154,20 @@ async def run_pending_async(phase_cb=None) -> tuple[str, int]:
             log(f"Researching: {req['text'][:80]}")
             finding = await research_one(session, req["text"], phase_cb=phase_cb)
             findings_blocks.append(finding)
-            lines[req["line_index"]] = f"- [x] {req['text']} (researched {today})"
+            processed_texts.append(req["text"])
 
+    # Re-read and patch by CONTENT, not the start-of-run snapshot: research
+    # takes minutes, and the panel may have appended new requests meanwhile —
+    # writing back the stale snapshot silently erased them (hunt-data #4).
+    with open(config.RESEARCH_REQUESTS_PATH) as f:
+        current_lines = f.read().splitlines()
+    processed = set(processed_texts)
+    for i, line in enumerate(current_lines):
+        m = CHECKBOX_RE.match(line)
+        if m and m.group(1) == " " and m.group(2).strip() in processed:
+            current_lines[i] = f"- [x] {m.group(2).strip()} (researched {today})"
     with open(config.RESEARCH_REQUESTS_PATH, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(current_lines) + "\n")
 
     return "\n\n".join(findings_blocks), len(requests)
 

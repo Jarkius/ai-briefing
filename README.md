@@ -137,12 +137,35 @@ Use Windows Task Scheduler with the included wrapper scripts:
    `fix_task_settings.ps1` (run from an elevated PowerShell prompt) to switch the task's
    power/logon settings.
 
-**Email delivery on corporate networks:** the current pipeline (`src/briefing/sender.py`)
-only sends via Gmail SMTP (trying port 465, then falling back to 587 — see
-"Gmail SMTP errors" below). The legacy `ai_briefing.py` had an Outlook COM automation
-fallback for networks where a proxy/DLP agent (e.g. Netskope) blocks outbound SMTP; that
-fallback has not been ported to the new pipeline. If you're on such a network, outbound
-Gmail SMTP must be reachable for scheduled sends to succeed.
+**Email delivery on corporate networks:** once the one-time OAuth setup is done
+(see "Gmail API fallback" below), `src/briefing/sender.py` sends via the **Gmail API
+over HTTPS/443 as the primary transport** — this works even on networks that reset
+TLS on the SMTP/IMAP ports. SMTP (465, then 587) is the fallback, and on Windows a
+further Outlook COM fallback exists. Without the OAuth token, SMTP is the only path
+and outbound Gmail SMTP must be reachable for scheduled sends to succeed.
+
+## Dashboard (control panel)
+
+An on-demand local web UI over the same pipeline:
+
+```bash
+./panel.sh        # serves http://127.0.0.1:8787 and opens your browser
+```
+
+| Tab | What it does |
+|---|---|
+| **Preview** | Renders both email parts exactly as they'd be sent (same in-memory HTML — no second render path). Regenerate re-runs the generate step from current DB state; Send does the dedup-checked real send. |
+| **Research** | Paste YouTube URLs / article URLs / topics; runs immediately in the background with live phase text. Jobs survive tab close (they die only with the server). |
+| **Style** | Edit `newsletter_style.md`; saves auto-commit locally (push stays manual). |
+| **Sources** | View/add `subscriptions.json` entries; new sources subscribe on the next collect run. |
+| **Schedule** | Change the daily launchd run time; rewrites the plist and reloads it immediately. |
+| **Settings** | Edit `.env` values; applied to the running server immediately, never committed. |
+| **Logs** | Live tail of `briefing.log` (cron runs), dashboard-job list, and a per-phase status strip. |
+
+**Security note (do not skip):** `/settings` edits real credentials, so the panel
+binds to `127.0.0.1` only. Never port-forward or expose port 8787 — there is no
+auth screen, by design; localhost-only *is* the access control. The CLI pipeline
+keeps working without the dashboard's dependencies installed.
 
 ## Two-computer workflow
 

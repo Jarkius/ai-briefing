@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Research</h1>
+
+<form hx-post="/research/run" hx-target="#banner" hx-swap="innerHTML">
+  <textarea name="text" rows="4" placeholder="Paste a YouTube URL, article URL, or topic — one per line. Leave empty to run any unchecked requests."></textarea>
+  <p class="muted" style="font-size:0.78rem; margin:0.4rem 0 0">
+    YouTube URLs are <strong>transcribed locally</strong> (Whisper) — that's the content; expect ~1 min per 20 min of video.
+    Article URLs are fetched and read. If you already have a summary or notes, skip the fetch — use the paste form below instead.
+  </p>
+  <div class="actions" style="margin-top:0.6rem">
+    <button type="submit">Run research</button>
+  </div>
+</form>
+
+<details class="paste-material">
+  <summary>Already have the material? Paste it directly</summary>
+  <form hx-post="/research/paste" hx-target="#banner" hx-swap="innerHTML">
+    <input type="text" name="title" placeholder="Title / source (e.g. 'My notes from X's keynote')" style="margin-bottom:0.5rem">
+    <textarea name="content" rows="7" placeholder="Paste a summary, article excerpt, or your own notes. No fetching — the next Regenerate rewrites this into the newsletter's own voice as Requested Research."></textarea>
+    <div class="actions" style="margin-top:0.6rem">
+      <button type="submit">File for next edition</button>
+    </div>
+  </form>
+</details>
+
+<div id="banner">{% if live_fragment %}{{ live_fragment | safe }}{% endif %}</div>
+
+<h2 class="muted" style="margin-top:2rem">Requests (newest first)</h2>
+<ul class="requests">
+  {% for r in requests %}
+  <li class="{{ 'done' if r.checked else 'pending' }}">
+    <span class="tick">{{ '☑' if r.checked else '☐' }}</span> {{ r.text }}
+    {% if r.archives %}
+    <span class="in-archives">→ in
+      {% for a in r.archives %}<a href="/archive?view={{ a.file }}">{{ a.date }} {{ a.time }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+    </span>
+    {% endif %}
+  </li>
+  {% else %}
+  <li class="empty-inline">No assignments filed yet — paste a link or a topic above and the desk gets to work.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

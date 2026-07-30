@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Preview</h1>
+  <div class="actions">
+    <button hx-post="/preview/regenerate" hx-target="#banner" hx-swap="innerHTML">Regenerate</button>
+    <button class="btn-send" hx-post="/preview/send" hx-target="#banner" hx-swap="innerHTML"
+            hx-confirm="Send both parts to the configured recipients now?">Send</button>
+  </div>
+</div>
+<div id="banner"></div>
+
+{% if pending.requests or pending.findings_chars or pending.drafts %}
+<div class="pending-strip">
+  <span class="pending-title">On the desk:</span>
+  {% if pending.requests %}
+  <a href="/research" class="pending-chip" title="{{ pending.requests | join(' · ') }}">
+    {{ pending.requests | length }} research request{{ 's' if pending.requests | length != 1 }} unprocessed</a>
+  {% endif %}
+  {% if pending.findings_chars %}
+  <span class="pending-chip is-ready" title="folds into the next Regenerate">
+    research findings ready ({{ pending.findings_chars }} chars)</span>
+  {% endif %}
+  {% if pending.drafts %}
+  <a href="/archive" class="pending-chip" title="generated but never emailed">
+    {{ pending.drafts }} draft{{ 's' if pending.drafts != 1 }} in the archive</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if gen %}
+<p class="muted">Generated {{ gen.date_str }} — exactly what sender would email (same in-memory HTML).</p>
+<section class="letter">
+  <h2>Part 1 · News &amp; Learning</h2>
+  <iframe class="mail-frame" srcdoc="{{ gen.part1_html | e }}" sandbox=""></iframe>
+</section>
+<section class="letter">
+  <h2>Part 2 · Technical &amp; Community</h2>
+  <iframe class="mail-frame" srcdoc="{{ gen.part2_html | e }}" sandbox=""></iframe>
+</section>
+{% else %}
+<div class="empty-state">
+  <span class="empty-drop">P</span>
+  <div class="empty-copy">
+    <p class="empty-head">The presses are quiet.</p>
+    <p class="muted">Nothing has been typeset this session — this tab shows the exact
+    in-memory HTML that send uses. Hit <strong>Regenerate</strong> to set tonight's
+    edition from the current feed database, or leaf through past editions in the
+    <a href="/archive">Archive</a>.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

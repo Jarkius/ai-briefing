@@ -150,3 +150,59 @@ def test_existing_subscription_names_returns_pairs(tmp_path):
         ("youtube", "some-channel"),
         ("news", "some-preset"),
     }
+
+
+def test_record_send_status_partial_when_mixed(tmp_path):
+    from unittest.mock import patch
+
+    from briefing import db as bdb
+
+    with patch.object(bdb, "SEND_STATUS_PATH", str(tmp_path / "s.json")), \
+         patch.object(bdb.config, "DATA_DIR", str(tmp_path)):
+        bdb.record_send_status("a.md", {"part1": "sent", "part2": "error: blip"})
+        bdb.record_send_status("b.md", {"part1": "error: x", "part2": "error: y"})
+        log = bdb.load_send_status()
+    assert log["a.md"]["status"] == "partial"  # half delivered != error
+    assert log["b.md"]["status"] == "error"
+
+
+def test_send_lock_serializes_record_send_status(tmp_path):
+    # hunt-data #1: concurrent read-modify-write lost one writer's key.
+    import threading
+    from unittest.mock import patch
+
+    from briefing import db as bdb
+
+    with patch.object(bdb, "SEND_STATUS_PATH", str(tmp_path / "s.json")), \
+         patch.object(bdb, "SEND_LOCK_PATH", str(tmp_path / ".lock")), \
+         patch.object(bdb.config, "DATA_DIR", str(tmp_path)):
+        threads = [
+            threading.Thread(target=bdb.record_send_status, args=(f"briefing_{i}.md", {"part1": "sent", "part2": "sent"}))
+            for i in range(8)
+        ]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        log = bdb.load_send_status()
+    assert len(log) == 8  # no lost updates
+
+
+def test_insert_run_degrades_on_persistent_lock(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from briefing import db as bdb
+
+    conn = MagicMock()
+    conn.execute.side_effect = sqlite3.OperationalError("database is locked")
+    with patch("time.sleep"):
+        row_id = bdb.insert_run(conn, source="cron", started_at="2026-07-30T05:00:00")
+    assert row_id == -1  # degraded, not raised
+
+
+def test_update_run_noop_for_degraded_run_id():
+    from unittest.mock import MagicMock
+
+    from briefing import db as bdb
+
+    conn = MagicMock()
+    bdb.update_run(conn, -1, send_status="ok")
+    conn.execute.assert_not_called()
