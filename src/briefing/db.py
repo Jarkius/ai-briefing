@@ -63,27 +63,57 @@ def _ensure_runs_table(conn: sqlite3.Connection):
     conn.commit()
 
 
+def _retry_locked(fn, label: str, attempts: int = 3):
+    """runs-table writes race the vendored MCP server's feed_items commits
+    (different tables, same sqlite file — writers serialize DB-wide). A
+    transient 'database is locked' on STATUS TRACKING must never kill the
+    pipeline (hunt-data #2: run.py doesn't wrap update_run in the phase
+    try/excepts). Retry briefly, then degrade to a log line."""
+    import time
+
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                raise
+            if attempt == attempts - 1:
+                print(f"[db] {label} skipped — database locked after {attempts} attempts", flush=True)
+                return None
+            time.sleep(1 + attempt)
+    return None
+
+
 def insert_run(conn: sqlite3.Connection, source: str, started_at: str) -> int:
     """Insert a new run row. `source` is 'cron' or 'dashboard'. Never update
     another writer's row — each call to insert_run owns exactly one row."""
-    cur = conn.execute(
-        "INSERT INTO runs (source, started_at) VALUES (?, ?)",
-        (source, started_at),
-    )
-    conn.commit()
-    return cur.lastrowid
+
+    def _do():
+        cur = conn.execute(
+            "INSERT INTO runs (source, started_at) VALUES (?, ?)",
+            (source, started_at),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    row_id = _retry_locked(_do, "insert_run")
+    return row_id if row_id is not None else -1
 
 
 def update_run(conn: sqlite3.Connection, run_id: int, **fields):
     """Update columns on a run row this process owns (by run_id)."""
-    if not fields:
+    if not fields or run_id < 0:
         return
     set_clause = ", ".join(f"{k} = ?" for k in fields)
-    conn.execute(
-        f"UPDATE runs SET {set_clause} WHERE id = ?",
-        (*fields.values(), run_id),
-    )
-    conn.commit()
+
+    def _do():
+        conn.execute(
+            f"UPDATE runs SET {set_clause} WHERE id = ?",
+            (*fields.values(), run_id),
+        )
+        conn.commit()
+
+    _retry_locked(_do, "update_run")
 
 
 def existing_subscription_names(conn: sqlite3.Connection) -> set[tuple[str, str]]:
@@ -106,6 +136,50 @@ def existing_subscription_names(conn: sqlite3.Connection) -> set[tuple[str, str]
 
 
 SEND_STATUS_PATH = os.path.join(config.DATA_DIR, "send_status.json")
+SEND_LOCK_PATH = os.path.join(config.DATA_DIR, ".send.lock")
+
+# Portable advisory lock (same platform split as mcp_client, duplicated here
+# so db.py doesn't pull in the mcp SDK import chain). BLOCKING variant —
+# holders keep it sub-second, so waiting beats failing.
+try:
+    import fcntl
+
+    def _lock_fd(fd):
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _unlock_fd(fd):
+        fcntl.flock(fd, fcntl.LOCK_UN)
+except ImportError:  # Windows
+    import msvcrt
+
+    def _lock_fd(fd):
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+
+    def _unlock_fd(fd):
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def send_lock():
+    """Cross-process lock serializing (a) send_status.json read-modify-write
+    and (b) the dedup-check-then-send sequence, between cron and the panel
+    on the same machine. Found by hunt-data: two concurrent
+    record_send_status calls silently lost one writer's key, and two
+    same-subject sends inside the mailbox-visibility window could both pass
+    the already-sent check."""
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    fd = os.open(SEND_LOCK_PATH, os.O_CREAT | os.O_RDWR)
+    try:
+        _lock_fd(fd)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            _unlock_fd(fd)
+        os.close(fd)
 
 
 def record_send_status(archive_file: str, result: dict) -> None:
@@ -128,17 +202,20 @@ def record_send_status(archive_file: str, result: dict) -> None:
         status = "partial"
     else:
         status = "error"
-    log = load_send_status()
-    log[archive_file] = {
-        "status": status,
-        "detail": result,
-        "at": datetime.now().isoformat(timespec="seconds"),
-    }
-    os.makedirs(config.DATA_DIR, exist_ok=True)
-    tmp = SEND_STATUS_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(log, f, indent=2)
-    os.replace(tmp, SEND_STATUS_PATH)
+    # Under the lock: load→mutate→replace is a lost-update race when cron's
+    # post-send record collides with a panel archive-send record.
+    with send_lock():
+        log = load_send_status()
+        log[archive_file] = {
+            "status": status,
+            "detail": result,
+            "at": datetime.now().isoformat(timespec="seconds"),
+        }
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        tmp = SEND_STATUS_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(log, f, indent=2)
+        os.replace(tmp, SEND_STATUS_PATH)
 
 
 def load_send_status() -> dict:
