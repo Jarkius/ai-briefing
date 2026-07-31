@@ -213,7 +213,7 @@ def record_send_status(archive_file: str, result: dict) -> None:
         }
         os.makedirs(config.DATA_DIR, exist_ok=True)
         tmp = SEND_STATUS_PATH + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(log, f, indent=2)
         os.replace(tmp, SEND_STATUS_PATH)
 
@@ -224,7 +224,7 @@ def load_send_status() -> dict:
     if not os.path.exists(SEND_STATUS_PATH):
         return {}
     try:
-        with open(SEND_STATUS_PATH) as f:
+        with open(SEND_STATUS_PATH, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}

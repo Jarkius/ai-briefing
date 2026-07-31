@@ -223,7 +223,7 @@ async def _research_job(phase) -> str:
 async def research(request: Request):
     reqs = []
     if os.path.exists(config.RESEARCH_REQUESTS_PATH):
-        with open(config.RESEARCH_REQUESTS_PATH) as f:
+        with open(config.RESEARCH_REQUESTS_PATH, encoding="utf-8") as f:
             reqs = researcher.parse_requests(f.read())
     reqs.reverse()  # newest first
     # Map each completed request to the archive(s) whose research receipt
@@ -262,7 +262,7 @@ async def research_run(text: str = Form("")):
     if text:
         # Append pasted requests as unchecked lines; the job picks them up.
         lines = [f"- [ ] {ln.strip()}" for ln in text.splitlines() if ln.strip()]
-        with open(config.RESEARCH_REQUESTS_PATH, "a") as f:
+        with open(config.RESEARCH_REQUESTS_PATH, "a", encoding="utf-8") as f:
             f.write("\n" + "\n".join(lines) + "\n")
     job_id = jobs.submit_async("research", _research_job)
     return HTMLResponse(_job_fragment(job_id))
@@ -306,7 +306,7 @@ async def style_page(request: Request):
 
 @app.post("/style", response_class=HTMLResponse)
 async def style_save(style_text: str = Form("")):
-    with open(config.STYLE_PATH, "w") as f:
+    with open(config.STYLE_PATH, "w", encoding="utf-8") as f:
         f.write(style_text)
     err = _pathspec_commit("dashboard: update newsletter style", config.STYLE_PATH)
     if err:
@@ -435,7 +435,7 @@ def _provider_status(name: str) -> str:
 def _read_env_lines() -> list[str]:
     if not os.path.exists(config.ENV_PATH):
         return []
-    with open(config.ENV_PATH) as f:
+    with open(config.ENV_PATH, encoding="utf-8") as f:
         return f.read().splitlines()
 
 
@@ -716,7 +716,7 @@ async def logs_tail():
     """
     tail = ""
     if os.path.exists(config.LOG_PATH):
-        with open(config.LOG_PATH, errors="replace") as f:
+        with open(config.LOG_PATH, encoding="utf-8", errors="replace") as f:
             tail = "".join(f.readlines()[-200:])
     jobs_rows = "".join(
         f'<tr><td>{j.started_at}</td><td>{html_lib.escape(j.name)}</td>'

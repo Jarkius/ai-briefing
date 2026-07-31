@@ -30,7 +30,7 @@ def _load_env():
     if a same-named var happens to be exported elsewhere — .env is the
     explicit, per-project source of truth and must win."""
     if os.path.exists(ENV_PATH):
-        with open(ENV_PATH) as f:
+        with open(ENV_PATH, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
@@ -152,12 +152,12 @@ def load_subscriptions() -> list[dict]:
     """Read subscriptions.json. Returns [] if the file doesn't exist yet."""
     if not os.path.exists(SUBSCRIPTIONS_PATH):
         return []
-    with open(SUBSCRIPTIONS_PATH) as f:
+    with open(SUBSCRIPTIONS_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_subscriptions(subs: list[dict]):
-    with open(SUBSCRIPTIONS_PATH, "w") as f:
+    with open(SUBSCRIPTIONS_PATH, "w", encoding="utf-8") as f:
         json.dump(subs, f, indent=2)
         f.write("\n")
 
@@ -165,7 +165,7 @@ def save_subscriptions(subs: list[dict]):
 def load_style() -> str:
     if not os.path.exists(STYLE_PATH):
         return ""
-    with open(STYLE_PATH) as f:
+    with open(STYLE_PATH, encoding="utf-8") as f:
         return f.read()
 
 
