@@ -610,13 +610,13 @@ def generate(conn, research_findings: str = "") -> dict:
     # the same minute must not overwrite each other's archive.
     hhmm = datetime.now().strftime("%H%M%S")
     archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}.md")
-    with open(archive_path, "w") as f:
+    with open(archive_path, "w", encoding="utf-8") as f:
         f.write(markdown)
     part1_archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}_part1_news.md")
-    with open(part1_archive_path, "w") as f:
+    with open(part1_archive_path, "w", encoding="utf-8") as f:
         f.write(part1_md)
     part2_archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}_part2_technical.md")
-    with open(part2_archive_path, "w") as f:
+    with open(part2_archive_path, "w", encoding="utf-8") as f:
         f.write(part2_md)
     log(f"Archived to {archive_path}, {part1_archive_path}, {part2_archive_path}")
 

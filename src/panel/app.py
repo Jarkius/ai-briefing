@@ -47,7 +47,7 @@ async def preview(request: Request):
     # Pending-work strip: what's waiting to go into (or out of) an edition.
     pending_requests = []
     if os.path.exists(config.RESEARCH_REQUESTS_PATH):
-        with open(config.RESEARCH_REQUESTS_PATH) as f:
+        with open(config.RESEARCH_REQUESTS_PATH, encoding="utf-8") as f:
             pending_requests = [
                 r["text"] for r in researcher.parse_requests(f.read()) if not r["checked"]
             ]
@@ -496,9 +496,9 @@ async def settings_save(request: Request):
     for key in SETTINGS_KEYS:
         if key in form and key not in seen and str(form[key]).strip():
             lines.append(f"{key}={form[key]}")
-    with open(config.ENV_PATH, "w") as f:
+    with open(config.ENV_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    os.chmod(config.ENV_PATH, 0o600)
+    config.restrict_to_owner_only(config.ENV_PATH)
     # Review M2: without this, the running server keeps stale constants and
     # the next regenerate/send silently uses the old values.
     config.reload()
@@ -577,7 +577,7 @@ def _archive_date_str(date_part: str) -> str:
 def _render_archive(fname: str, date_part: str) -> dict:
     """Re-render an archived markdown into the exact two-part HTML the
     sender uses, with the ARCHIVE's own date."""
-    with open(os.path.join(config.ARCHIVE_DIR, fname)) as f:
+    with open(os.path.join(config.ARCHIVE_DIR, fname), encoding="utf-8") as f:
         markdown = f.read()
     date_str = _archive_date_str(date_part)
     p1_md, p2_md = sender.split_two_parts(markdown)
