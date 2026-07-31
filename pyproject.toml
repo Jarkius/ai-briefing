@@ -9,7 +9,11 @@ description = "Daily AI briefing: collect via MCP feed layer, summarize with Gem
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "mcp>=1.0.0",
+    # <2.0.0: mcp 2.0.0 renamed/restructured mcp.server.fastmcp into
+    # mcp.server.mcpserver, breaking the vendored noapi-google-search-mcp
+    # fork (setup.sh), which still imports the old path. Verified working
+    # at 1.29.0.
+    "mcp>=1.0.0,<2.0.0",
     "google-auth>=2.30.0",
     "google-auth-oauthlib>=1.2.0",
     "google-api-python-client>=2.130.0",
