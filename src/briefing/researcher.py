@@ -138,7 +138,7 @@ async def run_pending_async(phase_cb=None) -> tuple[str, int]:
     if not __import__("os").path.exists(config.RESEARCH_REQUESTS_PATH):
         return "", 0
 
-    with open(config.RESEARCH_REQUESTS_PATH) as f:
+    with open(config.RESEARCH_REQUESTS_PATH, encoding="utf-8") as f:
         text = f.read()
 
     requests = [r for r in parse_requests(text) if not r["checked"]]
@@ -159,14 +159,14 @@ async def run_pending_async(phase_cb=None) -> tuple[str, int]:
     # Re-read and patch by CONTENT, not the start-of-run snapshot: research
     # takes minutes, and the panel may have appended new requests meanwhile —
     # writing back the stale snapshot silently erased them (hunt-data #4).
-    with open(config.RESEARCH_REQUESTS_PATH) as f:
+    with open(config.RESEARCH_REQUESTS_PATH, encoding="utf-8") as f:
         current_lines = f.read().splitlines()
     processed = set(processed_texts)
     for i, line in enumerate(current_lines):
         m = CHECKBOX_RE.match(line)
         if m and m.group(1) == " " and m.group(2).strip() in processed:
             current_lines[i] = f"- [x] {m.group(2).strip()} (researched {today})"
-    with open(config.RESEARCH_REQUESTS_PATH, "w") as f:
+    with open(config.RESEARCH_REQUESTS_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(current_lines) + "\n")
 
     return "\n\n".join(findings_blocks), len(requests)
