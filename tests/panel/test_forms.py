@@ -3,6 +3,7 @@ pathspec commits (mocked), config.reload() invocation, and no-value-logging.
 """
 
 import os
+import sys
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -150,7 +151,11 @@ def test_settings_post_rewrites_env_calls_reload_and_never_logs(tmp_path, capsys
     assert "# comment kept" in content       # unrelated lines preserved
     assert "UNRELATED=stay" in content
     reload_mock.assert_called_once()          # review M2
-    assert oct(os.stat(env).st_mode & 0o777) == "0o600"
+    if sys.platform != "win32":
+        assert oct(os.stat(env).st_mode & 0o777) == "0o600"
+    # On Windows, os.stat().st_mode can't reflect real ACLs — see
+    # config.restrict_to_owner_only's docstring; test_config.py covers the
+    # real icacls-based restriction there.
     # never logged server-side
     captured = capsys.readouterr()
     assert "sk-SECRET-VALUE-123" not in captured.out + captured.err

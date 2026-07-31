@@ -22,6 +22,32 @@ def _connect(tmp_path):
     return conn
 
 
+# ---- connect ----------------------------------------------------------------
+
+
+def test_connect_creates_data_dir_and_configures_connection(tmp_path):
+    from unittest.mock import patch
+
+    from briefing import db as bdb
+
+    data_dir = tmp_path / "newdata"
+    db_path = data_dir / "feeds.db"
+    with patch.object(bdb.config, "DATA_DIR", str(data_dir)), \
+         patch.object(bdb.config, "FEEDS_DB_PATH", str(db_path)):
+        assert not data_dir.exists()
+        conn = bdb.connect()
+    try:
+        assert data_dir.exists()  # os.makedirs actually ran
+
+        row = conn.execute("SELECT 1 AS one").fetchone()
+        assert row["one"] == 1  # row_factory is sqlite3.Row, not a bare tuple
+
+        busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert busy_timeout == 15000
+    finally:
+        conn.close()
+
+
 # ---- assert_feed_items_schema ---------------------------------------------
 
 
@@ -206,3 +232,29 @@ def test_update_run_noop_for_degraded_run_id():
     conn = MagicMock()
     bdb.update_run(conn, -1, send_status="ok")
     conn.execute.assert_not_called()
+
+
+def test_insert_run_reraises_non_lock_operational_error(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from briefing import db as bdb
+
+    conn = MagicMock()
+    conn.execute.side_effect = sqlite3.OperationalError("no such table: runs")
+    with patch("time.sleep"):
+        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+            bdb.insert_run(conn, source="cron", started_at="2026-07-30T05:00:00")
+
+
+# ---- load_send_status --------------------------------------------------------
+
+
+def test_load_send_status_returns_empty_dict_on_corrupt_json(tmp_path):
+    from unittest.mock import patch
+
+    from briefing import db as bdb
+
+    status_path = tmp_path / "s.json"
+    status_path.write_text("{not valid json")
+    with patch.object(bdb, "SEND_STATUS_PATH", str(status_path)):
+        assert bdb.load_send_status() == {}

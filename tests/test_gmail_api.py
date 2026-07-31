@@ -6,6 +6,7 @@ Credentials loader are mocked throughout.
 """
 
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 from briefing import gmail_api
@@ -32,6 +33,23 @@ def test_get_credentials_raises_clear_error_when_unconfigured(tmp_path):
             assert "setup_gmail_oauth.py" in str(e)
 
 
+def test_get_credentials_returns_valid_token_without_refresh(tmp_path):
+    token_path = tmp_path / "token.json"
+    token_path.write_text("{}")
+
+    fake_creds = MagicMock(expired=False, refresh_token="rt")
+
+    with patch.object(gmail_api, "TOKEN_PATH", str(token_path)), \
+         patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=fake_creds):
+        creds = gmail_api._get_credentials()
+
+    assert creds is fake_creds
+    fake_creds.refresh.assert_not_called()
+    # no refresh means no atomic write: original content untouched, no tmp file left behind
+    assert not (tmp_path / "token.json.tmp").exists()
+    assert token_path.read_text() == "{}"
+
+
 def test_get_credentials_refreshes_expired_token(tmp_path):
     token_path = tmp_path / "token.json"
     token_path.write_text("{}")
@@ -46,6 +64,18 @@ def test_get_credentials_refreshes_expired_token(tmp_path):
     assert creds is fake_creds
     fake_creds.refresh.assert_called_once()
     assert token_path.read_text() == '{"refreshed": true}'
+
+
+def test_service_builds_gmail_client_with_credentials():
+    fake_creds = MagicMock()
+    fake_service = MagicMock()
+
+    with patch.object(gmail_api, "_get_credentials", return_value=fake_creds), \
+         patch("googleapiclient.discovery.build", return_value=fake_service) as mock_build:
+        service = gmail_api._service()
+
+    mock_build.assert_called_once_with("gmail", "v1", credentials=fake_creds)
+    assert service is fake_service
 
 
 def test_send_email_via_api_builds_and_sends_raw_message():
@@ -88,5 +118,9 @@ def test_refresh_write_is_atomic_and_owner_only(tmp_path):
 
     # temp file must be gone (os.replace'd into place), token owner-only
     assert not (tmp_path / "token.json.tmp").exists()
-    assert oct(os.stat(token_path).st_mode & 0o777) == "0o600"
     assert token_path.read_text() == '{"refreshed": true}'
+    if sys.platform != "win32":
+        assert oct(os.stat(token_path).st_mode & 0o777) == "0o600"
+    # On Windows, os.stat().st_mode can never reflect real ACLs (it only
+    # tracks the read-only attribute) — see config.restrict_to_owner_only's
+    # docstring. test_config.py covers the real icacls-based restriction.

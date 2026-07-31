@@ -4,6 +4,7 @@ No network, no real MCP server — session.call_tool is an AsyncMock.
 """
 
 import asyncio
+import socket
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -146,6 +147,47 @@ def test_research_one_topic_google_blocked_is_noted_not_raised():
     assert "blocked by bot detection" in result
 
 
+def test_research_one_youtube_transcription_failure_is_caught_not_raised():
+    session = AsyncMock()
+    session.call_tool.side_effect = RuntimeError("transcribe boom")
+
+    with _allow_all_urls():
+        result = asyncio.run(research_one(session, "https://youtu.be/abc123"))
+
+    assert "transcription failed" in result
+    assert "transcribe boom" in result
+
+
+def test_research_one_topic_feed_search_failure_is_caught_not_raised():
+    session = AsyncMock()
+    session.call_tool.side_effect = [
+        RuntimeError("feed boom"),
+        _text_result("web findings"),
+    ]
+
+    result = asyncio.run(research_one(session, "some topic"))
+
+    assert "feed search failed" in result
+    assert "feed boom" in result
+    assert "web findings" in result
+
+
+def test_research_one_topic_web_search_failure_is_caught_not_raised():
+    # distinct from the "blocked" branch above: here google_search itself
+    # raises, rather than returning a blocked-looking text result.
+    session = AsyncMock()
+    session.call_tool.side_effect = [
+        _text_result("feed findings"),
+        RuntimeError("google boom"),
+    ]
+
+    result = asyncio.run(research_one(session, "some topic"))
+
+    assert "feed findings" in result
+    assert "web search failed" in result
+    assert "google boom" in result
+
+
 # ---- SSRF guard (_public_url_error) ------------------------------------------
 # Loopback resolution needs no real DNS, so these run offline.
 
@@ -176,6 +218,18 @@ def test_research_one_refuses_private_url_without_calling_tool():
 def test_ssrf_guard_allows_public_ip():
     # 1.1.1.1 is a literal global IP — no DNS needed
     assert _public_url_error("https://1.1.1.1/") is None
+
+
+def test_ssrf_guard_refuses_url_with_no_hostname():
+    # scheme-only/malformed URL — urllib.parse yields hostname=None
+    assert _public_url_error("http://") == "no hostname"
+
+
+def test_ssrf_guard_reports_dns_resolution_failure_without_propagating():
+    with patch("briefing.researcher.socket.getaddrinfo", side_effect=socket.gaierror("nope")):
+        result = _public_url_error("https://does-not-resolve.example/")
+    assert result is not None
+    assert "could not resolve host" in result
 
 
 def test_run_pending_preserves_lines_appended_mid_run(tmp_path, monkeypatch):
@@ -211,3 +265,49 @@ def test_run_pending_preserves_lines_appended_mid_run(tmp_path, monkeypatch):
     assert count == 1
     assert "- [x] first topic (researched" in content   # processed one flipped
     assert "- [ ] appended while running" in content    # concurrent append SURVIVES
+
+
+def test_run_pending_async_returns_early_when_file_missing(tmp_path, monkeypatch):
+    from briefing import config as bconfig
+    from briefing import researcher
+
+    missing = tmp_path / "does_not_exist.md"
+    monkeypatch.setattr(bconfig, "RESEARCH_REQUESTS_PATH", str(missing))
+
+    with patch.object(researcher.mcp_client, "McpSession") as mock_session_cls:
+        result = asyncio.run(researcher.run_pending_async())
+
+    assert result == ("", 0)
+    mock_session_cls.assert_not_called()
+
+
+def test_run_pending_async_returns_early_when_no_unchecked_requests(tmp_path, monkeypatch):
+    from briefing import config as bconfig
+    from briefing import researcher
+
+    reqfile = tmp_path / "research_requests.md"
+    reqfile.write_text("- [x] already done (researched 2026-07-20)\n")
+    monkeypatch.setattr(bconfig, "RESEARCH_REQUESTS_PATH", str(reqfile))
+
+    with patch.object(researcher.mcp_client, "McpSession") as mock_session_cls:
+        result = asyncio.run(researcher.run_pending_async())
+
+    assert result == ("", 0)
+    mock_session_cls.assert_not_called()
+
+
+# ---- run_pending (sync wrapper) -------------------------------------------
+
+
+def test_run_pending_delegates_to_run_pending_async_and_returns_its_result():
+    from briefing import researcher
+
+    with patch("briefing.researcher.mcp_client.mcp_lock") as mock_lock, \
+         patch(
+             "briefing.researcher.run_pending_async", new=AsyncMock(return_value=("findings", 1))
+         ) as mock_run_pending_async:
+        result = researcher.run_pending()
+
+    assert result == ("findings", 1)
+    mock_lock.assert_called_once_with(retry_seconds=120)
+    mock_run_pending_async.assert_awaited_once_with()

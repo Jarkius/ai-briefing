@@ -73,7 +73,8 @@ def test_archive_list_flags_research_entries(tmp_path):
     plain.write_text(FULL_MD)
     researched = tmp_path / "briefing_2026-07-25_0600.md"
     researched.write_text(
-        FULL_MD + "\n\n## 🔍 Requested Research (included in this issue)\n- https://youtu.be/abc\n"
+        FULL_MD + "\n\n## 🔍 Requested Research (included in this issue)\n- https://youtu.be/abc\n",
+        encoding="utf-8",
     )
     with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)):
         entries = _list_archives()
