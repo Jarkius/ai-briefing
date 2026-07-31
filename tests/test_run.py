@@ -1,0 +1,318 @@
+"""Tests for run.py: the 4-phase CLI orchestrator (collect -> research ->
+generate -> send).
+
+run.py lives at the repo root, not under src/, so it isn't on sys.path via
+the editable install of the `briefing` package — insert the repo root here
+(same pattern run.py itself uses for src/) rather than touching conftest.py.
+
+Every collaborator (collector, researcher, generator, sender, db) is
+monkeypatched — no real network, email, AI, or database calls.
+"""
+
+import os
+import sys
+from unittest.mock import MagicMock
+
+import pytest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+import run  # noqa: E402
+
+
+class _Recorder:
+    """Captures db.* calls made through run.main() without touching sqlite."""
+
+    def __init__(self):
+        self.conn = MagicMock(name="conn")
+        self.run_id = 42
+        self.insert_run = MagicMock(return_value=self.run_id)
+        self.update_calls = []
+        self.record_send_status = MagicMock()
+
+    def update_run(self, conn_arg, run_id, **fields):
+        assert conn_arg is self.conn
+        self.update_calls.append((run_id, fields))
+
+    def status_for(self, key):
+        """Value passed for `key` in the most recent update_run call that set it."""
+        for run_id, fields in reversed(self.update_calls):
+            if key in fields:
+                return fields[key]
+        return None
+
+
+@pytest.fixture
+def rec(monkeypatch):
+    r = _Recorder()
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    monkeypatch.setattr(run.config, "require_env", lambda: None)
+    monkeypatch.setattr(run.db, "connect", lambda: r.conn)
+    monkeypatch.setattr(run.db, "insert_run", r.insert_run)
+    monkeypatch.setattr(run.db, "update_run", r.update_run)
+    monkeypatch.setattr(run.db, "record_send_status", r.record_send_status)
+    return r
+
+
+def _generate_result(**overrides):
+    result = {
+        "part1_html": "<p>one</p>",
+        "part2_html": "<p>two</p>",
+        "date_str": "Thursday, July 30, 2026",
+        "archive_file": "briefing_2026-07-30_0800.md",
+    }
+    result.update(overrides)
+    return result
+
+
+# ---- happy path -------------------------------------------------------------
+
+
+def test_main_happy_path_runs_all_phases_in_order(rec, monkeypatch):
+    call_order = []
+
+    def fake_collect(run_id, conn):
+        call_order.append("collect")
+        assert run_id == rec.run_id
+        assert conn is rec.conn
+        return "ok"
+
+    def fake_run_pending():
+        call_order.append("research")
+        return "some findings", 3
+
+    generate_result = _generate_result()
+
+    def fake_generate(conn, research_findings=""):
+        call_order.append("generate")
+        assert conn is rec.conn
+        assert research_findings == "some findings"
+        return generate_result
+
+    send_result = {"part1": "sent", "part2": "sent"}
+
+    def fake_send(part1_html, part2_html, date_str):
+        call_order.append("send")
+        assert part1_html == "<p>one</p>"
+        assert part2_html == "<p>two</p>"
+        assert date_str == "Thursday, July 30, 2026"
+        return send_result
+
+    monkeypatch.setattr(run.collector, "run", fake_collect)
+    monkeypatch.setattr(run.researcher, "run_pending", fake_run_pending)
+    monkeypatch.setattr(run.generator, "generate", fake_generate)
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", fake_send)
+
+    run.main()
+
+    assert call_order == ["collect", "research", "generate", "send"]
+    rec.conn.close.assert_called_once()
+    assert rec.status_for("collect_status") == "ok"
+    assert rec.status_for("research_status") == "ok (3 processed)"
+    assert rec.status_for("generate_status") == "ok"
+    assert rec.status_for("send_status") == str(send_result)
+    assert rec.status_for("finished_at") is not None
+    rec.record_send_status.assert_called_once_with(generate_result["archive_file"], send_result)
+
+
+def test_main_inserts_run_row_with_cron_source(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    monkeypatch.setattr(run.generator, "generate", lambda conn, research_findings="": None)
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", MagicMock())
+
+    run.main()
+
+    rec.insert_run.assert_called_once()
+    args, kwargs = rec.insert_run.call_args
+    assert args[0] is rec.conn
+    assert kwargs["source"] == "cron"
+    assert "started_at" in kwargs
+
+
+def test_main_research_status_reports_nothing_pending_when_count_zero(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+
+    generate_findings = []
+
+    def fake_generate(conn, research_findings=""):
+        generate_findings.append(research_findings)
+        return _generate_result()
+
+    monkeypatch.setattr(run.generator, "generate", fake_generate)
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", lambda p1, p2, d: {"part1": "sent", "part2": "sent"})
+
+    run.main()
+
+    assert rec.status_for("research_status") == "ok (nothing pending)"
+    assert generate_findings == [""]
+
+
+# ---- soft-fail branches ------------------------------------------------------
+
+
+def test_main_collect_phase_failure_is_caught_and_pipeline_continues(rec, monkeypatch):
+    def fake_collect(run_id, conn):
+        raise RuntimeError("feed down")
+
+    research_called = []
+    generate_findings = []
+    send_called = []
+
+    def fake_run_pending():
+        research_called.append(True)
+        return "findings", 1
+
+    def fake_generate(conn, research_findings=""):
+        generate_findings.append(research_findings)
+        return _generate_result()
+
+    def fake_send(part1_html, part2_html, date_str):
+        send_called.append(True)
+        return {"part1": "sent", "part2": "sent"}
+
+    monkeypatch.setattr(run.collector, "run", fake_collect)
+    monkeypatch.setattr(run.researcher, "run_pending", fake_run_pending)
+    monkeypatch.setattr(run.generator, "generate", fake_generate)
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", fake_send)
+
+    run.main()
+
+    assert rec.status_for("collect_status") == "error: feed down"
+    # later phases still ran despite the collect failure
+    assert research_called == [True]
+    assert generate_findings == ["findings"]
+    assert send_called == [True]
+
+
+def test_main_research_phase_failure_is_caught_and_pipeline_continues(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+
+    def fake_run_pending():
+        raise RuntimeError("google blocked")
+
+    generate_findings = []
+    send_called = []
+
+    def fake_generate(conn, research_findings=""):
+        generate_findings.append(research_findings)
+        return _generate_result()
+
+    def fake_send(part1_html, part2_html, date_str):
+        send_called.append(True)
+        return {"part1": "sent", "part2": "sent"}
+
+    monkeypatch.setattr(run.researcher, "run_pending", fake_run_pending)
+    monkeypatch.setattr(run.generator, "generate", fake_generate)
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", fake_send)
+
+    run.main()
+
+    assert rec.status_for("research_status") == "error: google blocked"
+    # research_findings never got assigned past its "" default, so generate
+    # still ran — with no findings, not with stale data from a prior run
+    assert generate_findings == [""]
+    assert send_called == [True]
+
+
+def test_main_generate_phase_failure_skips_send(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+
+    def fake_generate(conn, research_findings=""):
+        raise RuntimeError("gemini down")
+
+    send_mock = MagicMock()
+    monkeypatch.setattr(run.generator, "generate", fake_generate)
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", send_mock)
+
+    run.main()
+
+    assert rec.status_for("generate_status") == "error: gemini down"
+    # result stayed None, so the send phase's `if result:` guard never opens
+    assert rec.status_for("send_status") == "skipped"
+    send_mock.assert_not_called()
+    rec.record_send_status.assert_not_called()
+
+
+def test_main_send_phase_failure_records_error_status(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    monkeypatch.setattr(run.generator, "generate", lambda conn, research_findings="": _generate_result())
+
+    def fake_send(part1_html, part2_html, date_str):
+        raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", fake_send)
+
+    run.main()
+
+    assert rec.status_for("send_status") == "error: smtp down"
+    rec.record_send_status.assert_not_called()
+
+
+# ---- --dry-run ----------------------------------------------------------------
+
+
+def test_main_dry_run_skips_send_and_prints_preview(rec, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run.py", "--dry-run"])
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    monkeypatch.setattr(
+        run.generator,
+        "generate",
+        lambda conn, research_findings="": _generate_result(
+            part1_html="<p>PART ONE CONTENT</p>", part2_html="<p>PART TWO CONTENT</p>"
+        ),
+    )
+    send_mock = MagicMock()
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", send_mock)
+
+    run.main()
+
+    out = capsys.readouterr().out
+    assert "PART 1" in out
+    assert "PART 2" in out
+    assert "PART ONE CONTENT" in out
+    assert "PART TWO CONTENT" in out
+    send_mock.assert_not_called()
+    rec.record_send_status.assert_not_called()
+    assert rec.status_for("send_status") == "dry_run"
+
+
+# ---- db.record_send_status -----------------------------------------------------
+
+
+def test_main_records_send_status_with_archive_file_and_send_result(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    monkeypatch.setattr(
+        run.generator,
+        "generate",
+        lambda conn, research_findings="": _generate_result(archive_file="briefing_2026-07-30_0800.md"),
+    )
+    send_result = {"part1": "sent", "part2": "already_sent"}
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", lambda p1, p2, d: send_result)
+
+    run.main()
+
+    rec.record_send_status.assert_called_once_with("briefing_2026-07-30_0800.md", send_result)
+    assert rec.status_for("send_status") == str(send_result)
+
+
+def test_main_skips_record_send_status_when_no_archive_file(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    result_without_archive = _generate_result()
+    del result_without_archive["archive_file"]
+    monkeypatch.setattr(run.generator, "generate", lambda conn, research_findings="": result_without_archive)
+    monkeypatch.setattr(
+        run.sender, "send_two_part_briefing", lambda p1, p2, d: {"part1": "sent", "part2": "sent"}
+    )
+
+    run.main()
+
+    rec.record_send_status.assert_not_called()

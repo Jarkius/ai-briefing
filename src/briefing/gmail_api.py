@@ -52,11 +52,11 @@ def _get_credentials():
         # is atomic on POSIX and Windows; worst case now is one refresh
         # harmlessly overwriting the other's equally-valid token.
         tmp_path = TOKEN_PATH + ".tmp"
-        with open(tmp_path, "w") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(creds.to_json())
         # gmail.modify scope = full mailbox read+send; default umask leaves
         # the token world-readable. Owner-only, like .env.
-        os.chmod(tmp_path, 0o600)
+        config.restrict_to_owner_only(tmp_path)
         os.replace(tmp_path, TOKEN_PATH)
     return creds
 

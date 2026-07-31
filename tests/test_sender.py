@@ -11,10 +11,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from briefing.sender import (
+    _inline,
+    _section_style,
     _send_via_outlook,
+    _SECTION_STYLES,
     _with_retry,
     already_sent_today,
+    markdown_to_html,
     send_email,
+    send_two_part_briefing,
     split_two_parts,
 )
 
@@ -291,3 +296,185 @@ def test_send_via_outlook_raises_on_nonzero_returncode():
     ), patch("briefing.sender.os.remove"):
         with pytest.raises(RuntimeError, match="COM error"):
             _send_via_outlook("subject", "<p>html</p>")
+
+
+# ---- _inline (markdown -> inline HTML) --------------------------------------
+
+
+def test_inline_renders_markdown_link_as_anchor():
+    html = _inline("[Anthropic](https://anthropic.com)")
+    assert html == '<a href="https://anthropic.com" style="color:#26890D">Anthropic</a>'
+
+
+def test_inline_leaves_non_http_link_as_plain_label():
+    html = _inline("[label](ftp://example.com/file)")
+    assert html == "label"
+    assert "<a" not in html
+
+
+def test_inline_renders_bold_as_strong():
+    html = _inline("**important**")
+    assert html == "<strong>important</strong>"
+
+
+def test_inline_renders_italic_as_em():
+    html = _inline("*aside*")
+    assert html == "<em>aside</em>"
+
+
+def test_inline_composes_bold_and_link_without_corruption():
+    html = _inline("**Big News**: read the [full report](https://example.com/report)")
+    assert "<strong>Big News</strong>" in html
+    assert '<a href="https://example.com/report" style="color:#26890D">full report</a>' in html
+
+
+# ---- _section_style ----------------------------------------------------------
+
+
+def test_section_style_matches_top_3_header():
+    assert _section_style("Top 3 Stories Today") == _SECTION_STYLES["top 3"]
+
+
+def test_section_style_matches_security_header():
+    assert _section_style("AI Security & Privacy Roundup") == _SECTION_STYLES["security"]
+
+
+def test_section_style_matches_community_header():
+    assert _section_style("Community Highlights") == _SECTION_STYLES["community"]
+
+
+# ---- markdown_to_html: individual parsing branches --------------------------
+
+
+def test_markdown_to_html_renders_story_card_headline():
+    md = "## News\n**Big Announcement** Something happened today.\n"
+    out = markdown_to_html(md, "31 Jul 2026")
+    assert "<h3" in out
+    assert "Big Announcement" in out
+    assert "Something happened today." in out
+
+
+def test_markdown_to_html_renders_callout_box():
+    md = (
+        "## News\n"
+        "**Big Announcement**\n"
+        "**Key takeaway:** This changes everything.\n"
+    )
+    out = markdown_to_html(md, "31 Jul 2026")
+    assert "Key takeaway" in out
+    assert "This changes everything." in out
+    assert "border-left:3px solid" in out
+
+
+def test_markdown_to_html_renders_social_post_box():
+    md = (
+        "## News\n"
+        "**Big Announcement**\n"
+        "📱 Social post: Check this out!\n"
+    )
+    out = markdown_to_html(md, "31 Jul 2026")
+    assert "SHARE-READY POST" in out
+    assert "Check this out!" in out
+
+
+def test_markdown_to_html_renders_source_link_line():
+    md = (
+        "## News\n"
+        "**Big Announcement** Here is the story.\n"
+        "Source: https://example.com/article\n"
+    )
+    out = markdown_to_html(md, "31 Jul 2026")
+    assert "🔗" in out
+    assert "https://example.com/article" in out
+
+
+def test_markdown_to_html_renders_divider_as_rule():
+    md = "## News\nSome intro text.\n---\n## More\nSome other text.\n"
+    out = markdown_to_html(md, "31 Jul 2026")
+    assert "border-top:2px solid #86BC25;" in out
+
+
+def test_markdown_to_html_composes_multiple_sections_without_corruption():
+    md = (
+        "## Top 3\n"
+        "**OpenAI Ships New Model** OpenAI released a major update today.\n"
+        "**Key takeaway:** This changes the competitive landscape.\n"
+        "📱 Social post: Big day for AI!\n"
+        "Source: https://openai.com/blog/update\n"
+        "---\n"
+        "## Community\n"
+        "Members shared their favorite tools this week.\n"
+    )
+    out = markdown_to_html(md, "31 Jul 2026")
+    assert "🔥 Top Stories" in out
+    assert "💬 Community" in out
+    assert "OpenAI Ships New Model" in out
+    assert "Key takeaway" in out
+    assert "SHARE-READY POST" in out
+    assert "🔗" in out
+    assert "border-top:2px solid #86BC25;" in out
+
+
+# ---- send_email: SMTP:465 fails, SMTP:587 recovers ---------------------------
+
+
+def test_send_email_recovers_via_smtp_587_when_465_fails():
+    server = MagicMock()
+    server.__enter__.return_value = server
+    server.__exit__.return_value = False
+    with _api_unconfigured(), _mock_smtp_ssl_failing(), \
+         patch("briefing.sender.smtplib.SMTP", return_value=server), \
+         patch("briefing.sender.time.sleep"):
+        send_email("subject", "<p>html</p>")
+    server.starttls.assert_called_once()
+    server.sendmail.assert_called_once()
+
+
+# ---- send_two_part_briefing --------------------------------------------------
+
+
+def _mock_send_lock():
+    cm = MagicMock()
+    cm.__enter__.return_value = None
+    cm.__exit__.return_value = False
+    return patch("briefing.db.send_lock", return_value=cm)
+
+
+def test_send_two_part_briefing_both_parts_sent():
+    with patch("briefing.sender.already_sent_today", return_value=False), \
+         patch("briefing.sender.send_email") as mock_send, \
+         _mock_send_lock():
+        result = send_two_part_briefing("<p>p1</p>", "<p>p2</p>", "31 Jul 2026")
+    assert result == {"part1": "sent", "part2": "sent"}
+    assert mock_send.call_count == 2
+
+
+def test_send_two_part_briefing_skips_part_already_sent():
+    with patch("briefing.sender.already_sent_today", side_effect=[True, False]), \
+         patch("briefing.sender.send_email") as mock_send, \
+         _mock_send_lock():
+        result = send_two_part_briefing("<p>p1</p>", "<p>p2</p>", "31 Jul 2026")
+    assert result["part1"] == "already_sent"
+    assert result["part2"] == "sent"
+    mock_send.assert_called_once()
+
+
+def test_send_two_part_briefing_partial_when_one_part_fails():
+    def _send_side_effect(subject, html):
+        if "Part 2" in subject:
+            raise RuntimeError("smtp blip")
+
+    with patch("briefing.sender.already_sent_today", return_value=False), \
+         patch("briefing.sender.send_email", side_effect=_send_side_effect), \
+         _mock_send_lock():
+        result = send_two_part_briefing("<p>p1</p>", "<p>p2</p>", "31 Jul 2026")
+    assert result["part1"] == "sent"
+    assert result["part2"] == "error: smtp blip"
+
+
+def test_send_two_part_briefing_both_error_when_both_fail():
+    with patch("briefing.sender.already_sent_today", return_value=False), \
+         patch("briefing.sender.send_email", side_effect=RuntimeError("down")), \
+         _mock_send_lock():
+        result = send_two_part_briefing("<p>p1</p>", "<p>p2</p>", "31 Jul 2026")
+    assert result == {"part1": "error: down", "part2": "error: down"}

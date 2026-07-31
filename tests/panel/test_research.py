@@ -145,7 +145,8 @@ def test_research_page_links_requests_to_their_archives(tmp_path):
     arch = tmp_path / "archives"
     arch.mkdir()
     (arch / "briefing_2026-07-25_0600.md").write_text(
-        "# AI Briefing\n## S1\nx\n\n## 🔍 Requested Research (included in this issue)\n- https://youtu.be/abc\n"
+        "# AI Briefing\n## S1\nx\n\n## 🔍 Requested Research (included in this issue)\n- https://youtu.be/abc\n",
+        encoding="utf-8",
     )
     with patch("panel.app.config.RESEARCH_REQUESTS_PATH", str(reqfile)), \
          patch("panel.app.config.ARCHIVE_DIR", str(arch)):

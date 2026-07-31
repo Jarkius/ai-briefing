@@ -157,3 +157,8 @@ def test_running_job_lookup():
     assert jobs.running_job("send") == "b"
     assert jobs.running_job("regenerate") is None
     jobs.JOBS.clear()
+
+
+def test_get_returns_none_for_unknown_job_id():
+    jobs.JOBS.clear()
+    assert jobs.get("no-such-job-id") is None

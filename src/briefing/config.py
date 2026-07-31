@@ -167,3 +167,30 @@ def load_style() -> str:
         return ""
     with open(STYLE_PATH) as f:
         return f.read()
+
+
+def restrict_to_owner_only(path: str):
+    """Best-effort lock a secrets file (.env, the Gmail OAuth token) down to
+    the current user. os.chmod(0o600) is a no-op for access control on
+    Windows/NTFS — it only toggles the read-only attribute, so a write mode
+    like 0o600 actually clears read-only and leaves the file readable by
+    every account with filesystem access (confirmed: os.stat().st_mode
+    reports 0o666 right back, even after this runs). icacls with
+    /inheritance:r strips the inherited ACEs (where Users/Everyone get
+    their access) and /grant:r replaces them with only the current user."""
+    if sys.platform != "win32":
+        os.chmod(path, 0o600)
+        return
+    import getpass
+    import subprocess
+
+    domain = os.environ.get("USERDOMAIN", "")
+    user = os.environ.get("USERNAME") or getpass.getuser()
+    account = f"{domain}\\{user}" if domain else user
+    try:
+        subprocess.run(
+            ["icacls", path, "/inheritance:r", "/grant:r", f"{account}:F"],
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+    except Exception as e:
+        print(f"WARNING: could not restrict {path} to owner-only ({e})", flush=True)
