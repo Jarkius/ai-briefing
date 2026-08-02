@@ -27,20 +27,26 @@ def test_preview_renders_shell():
     assert "Preview" in r.text
 
 
+_OAUTH_OK = {"state": "ok", "age_days": 1.0, "days_left": 6.0}
+
+
 def test_status_idle_when_no_jobs_and_no_lock():
     from unittest.mock import patch
 
-    with patch("panel.app.mcp_client.is_locked", return_value=False):
+    with patch("panel.app.mcp_client.is_locked", return_value=False), \
+         patch("panel.app.gmail_api.token_status", return_value=_OAUTH_OK):
         r = client.get("/status")
     assert r.status_code == 200
     assert "dot-idle" in r.text
     assert 'hx-trigger="every 3s"' in r.text
+    assert "dot-warn" not in r.text  # token healthy -> no warning chip
 
 
 def test_status_shows_lock_when_cron_holds_it():
     from unittest.mock import patch
 
-    with patch("panel.app.mcp_client.is_locked", return_value=True):
+    with patch("panel.app.mcp_client.is_locked", return_value=True), \
+         patch("panel.app.gmail_api.token_status", return_value=_OAUTH_OK):
         r = client.get("/status")
     assert "dot-lock" in r.text
 
@@ -52,11 +58,34 @@ def test_status_shows_busy_when_job_running():
 
     jobs.JOBS["test123"] = jobs.Job(name="probe")
     try:
-        with patch("panel.app.mcp_client.is_locked", return_value=False):
+        with patch("panel.app.mcp_client.is_locked", return_value=False), \
+             patch("panel.app.gmail_api.token_status", return_value=_OAUTH_OK):
             r = client.get("/status")
         assert "dot-busy" in r.text
     finally:
         del jobs.JOBS["test123"]
+
+
+def test_status_shows_oauth_warning_when_expiring_soon():
+    from unittest.mock import patch
+
+    with patch("panel.app.mcp_client.is_locked", return_value=False), \
+         patch("panel.app.gmail_api.token_status",
+               return_value={"state": "expiring_soon", "age_days": 5.5, "days_left": 1.5}):
+        r = client.get("/status")
+    assert "dot-warn" in r.text
+    assert "1.5" in r.text
+
+
+def test_status_shows_oauth_expired_warning():
+    from unittest.mock import patch
+
+    with patch("panel.app.mcp_client.is_locked", return_value=False), \
+         patch("panel.app.gmail_api.token_status",
+               return_value={"state": "expired", "age_days": 9.0, "days_left": -2.0}):
+        r = client.get("/status")
+    assert "dot-warn" in r.text
+    assert "expired" in r.text.lower()
 
 
 # ---- structural invariants ---------------------------------------------------

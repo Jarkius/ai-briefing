@@ -25,7 +25,7 @@ from starlette.requests import Request
 # src/ on the path so `from briefing import ...` works however uvicorn is cwd'd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from briefing import config, db, generator, mcp_client, researcher, sender  # noqa: E402
+from briefing import config, db, gmail_api, generator, mcp_client, researcher, sender  # noqa: E402
 
 from . import jobs, state  # noqa: E402
 
@@ -171,6 +171,12 @@ def _job_fragment(job_id: str) -> str:
             'folded into the next <a href="/preview">Regenerate</a> as a '
             '"Requested Research" section.</div>'
             f'<pre class="findings">{findings}</pre>'
+        )
+    if job.name == "gmail-reauth":
+        return (
+            '<div class="banner banner-ok" hx-get="/settings" hx-trigger="load delay:1s" '
+            'hx-target="body" hx-swap="innerHTML">✓ re-authorized — Gmail send is good for '
+            'another 7 days.</div>'
         )
     return f'<div class="banner banner-ok">✓ {html_lib.escape(job.name)} done</div>'
 
@@ -463,8 +469,25 @@ async def settings_page(request: Request):
     return templates.TemplateResponse(
         request, "settings.html",
         {"active": "settings", "values": values, "providers": providers,
-         "cli_models": CLAUDE_CLI_MODELS},
+         "cli_models": CLAUDE_CLI_MODELS, "oauth": gmail_api.token_status()},
     )
+
+
+def _oauth_reauth_job() -> str:
+    """Blocking: opens a local browser for the human consent click. Runs on
+    a worker thread like every other job — the click itself can't be
+    automated, but starting/tracking it from the panel means no terminal."""
+    gmail_api.run_oauth_consent()
+    return "reauthorized"
+
+
+@app.post("/settings/gmail-reauth", response_class=HTMLResponse)
+async def settings_gmail_reauth():
+    existing = jobs.running_job("gmail-reauth")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_sync("gmail-reauth", _oauth_reauth_job)
+    return HTMLResponse(_job_fragment(job_id))
 
 
 @app.post("/settings", response_class=HTMLResponse)
@@ -749,6 +772,10 @@ async def status():
     green = idle · amber = a dashboard job is running · red = data/.mcp.lock
     is held (a cron collect/research or another process is mid-run).
     is_locked() is a quick flock probe, cheap enough to poll.
+
+    Gmail token expiry check rides this same poll (site-wide, every page —
+    Settings isn't where you're looking when 5am is what matters) rather
+    than adding a second poller; os.path.getmtime is equally cheap.
     """
     if mcp_client.is_locked():
         state, label = "lock", "cron/collect running"
@@ -756,7 +783,16 @@ async def status():
         state, label = "busy", "job running"
     else:
         state, label = "idle", "idle"
+
+    oauth = gmail_api.token_status()
+    oauth_html = ""
+    if oauth["state"] == "expired":
+        oauth_html = ' <a href="/settings" class="dot-warn" title="Gmail token expired — send may be broken">✉⚠</a>'
+    elif oauth["state"] == "expiring_soon":
+        oauth_html = f' <a href="/settings" class="dot-warn" title="Gmail token expires in {oauth["days_left"]}d">✉{oauth["days_left"]:g}d</a>'
+
     return HTMLResponse(
         f'<span id="status-dot" class="dot dot-{state}" title="{label}" '
         f'hx-get="/status" hx-trigger="every 3s" hx-swap="outerHTML">● {label}</span>'
+        f'{oauth_html}'
     )

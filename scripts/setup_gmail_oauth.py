@@ -66,26 +66,11 @@ def main():
                 "download the client secret JSON from step 2 and save it there, then re-run."
             )
 
-    from google_auth_oauthlib.flow import InstalledAppFlow
-
-    flow = InstalledAppFlow.from_client_secrets_file(
-        gmail_api.CLIENT_SECRET_PATH, gmail_api.SCOPES,
-    )
-
     print("\nOpening a browser for Google's consent screen...")
     print("(If no browser opens — e.g. you're on a headless/remote machine —")
     print(" this will print a URL to open manually and a code to paste back.)\n")
-    try:
-        creds = flow.run_local_server(port=0)
-    except Exception:
-        creds = flow.run_console()
-
-    with open(gmail_api.TOKEN_PATH, "w") as f:
-        f.write(creds.to_json())
-    # Owner-only, like .env — the token grants gmail.modify (read+send) and
-    # the client secret identifies the OAuth app. Default umask is 0644.
-    os.chmod(gmail_api.TOKEN_PATH, 0o600)
-    os.chmod(gmail_api.CLIENT_SECRET_PATH, 0o600)
+    gmail_api.run_oauth_consent()  # shared with the panel's Re-authorize button
+    os.chmod(gmail_api.CLIENT_SECRET_PATH, 0o600)  # run_oauth_consent covers the token
 
     print(f"\nDone. Token saved to {gmail_api.TOKEN_PATH}.")
     print("The Gmail API fallback is now active — run.py will use it")

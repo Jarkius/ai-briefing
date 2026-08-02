@@ -83,6 +83,12 @@ nav a.active { color: var(--accent); border-bottom-color: var(--accent); }
 .dot-busy { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
 .dot-lock { color: var(--err); animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.45; } }
+.dot-warn {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.02em;
+  color: var(--err); text-decoration: none; margin-left: 0.4rem;
+}
+.dot-warn:hover { text-decoration: underline; }
+#gmail-reauth-btn { margin-left: 0.8rem; }
 
 main { max-width: 920px; margin: 2.2rem auto; padding: 0 1.5rem; }
 .muted { color: var(--muted); }
