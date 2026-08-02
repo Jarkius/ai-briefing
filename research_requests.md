@@ -37,3 +37,5 @@ dashboard's live research) and folds findings into the newsletter as a
 - [x] quantum computing breakthroughs 2026 (researched 2026-08-02)
 
 - [x] https://www.youtube.com/watch?v=dQw4w9WgXcQ (researched 2026-08-02)
+
+- [ ] https://www.youtube.com/watch?v=8jPQjjsBbIc
