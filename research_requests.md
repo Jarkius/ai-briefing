@@ -33,3 +33,5 @@ dashboard's live research) and folds findings into the newsletter as a
 - [x] https://www.youtube.com/watch?v=jNQXAC9IVRw (researched 2026-08-02)
 
 - [x] https://www.youtube.com/watch?v=jNQXAC9IVRw (researched 2026-08-02)
+
+- [x] quantum computing breakthroughs 2026 (researched 2026-08-02)
