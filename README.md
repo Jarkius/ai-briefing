@@ -114,7 +114,17 @@ cp com.user.ai-briefing.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.user.ai-briefing.plist
 ```
 
-Runs daily at 06:00. Logs to `briefing.log` / `briefing_error.log`.
+Runs daily at the hour/minute set in `StartCalendarInterval` (also editable
+via the control panel's Schedule tab, which writes both the repo copy and
+the installed `~/Library/LaunchAgents/` copy). Logs to `briefing.log` /
+`briefing_error.log`.
+
+`ProgramArguments` wraps the run in `caffeinate -i` — without it, the Mac
+sleeping mid-run pauses the process (not kills it), so a run that hits sleep
+during a provider retry can resume hours later exactly where it left off
+instead of failing fast. Observed 2026-08-02: a scheduled run took 11+ hours
+(05:33→16:53) this way before `caffeinate` was added. If you edit this
+plist by hand, keep the caffeinate wrapper.
 
 ### Scheduled Run (Windows)
 
@@ -231,6 +241,17 @@ set in `.env` (including intentionally commenting a key out) always wins —
 but this only applies to processes that actually load `.env` via
 `config.py`; a raw `echo $MAXPLUS_API_KEY` in your shell will still show
 whatever's exported there, which is expected and harmless.
+
+### `invalid_grant: Token has been expired or revoked`
+The Gmail API's OAuth refresh token died (Google can revoke test-mode
+tokens well before any long-lived-token expectation — observed here after
+only 2 days). Both send and the pre-send dedup check fall through to
+SMTP/IMAP when this happens; if the `GMAIL_APP_PASSWORD` in `.env` is also
+stale/wrong for the current `GMAIL_ADDRESS`, every send fails on both
+paths. Fix: re-run `scripts/setup_gmail_oauth.py` (needs a human browser
+click — this cannot be scripted) to get a fresh token, and/or update
+`GMAIL_APP_PASSWORD` to a valid app password for the current sending
+account.
 
 ### `data/.mcp.lock` seems stuck
 The lock (`fcntl.flock`) releases automatically when its holding process
