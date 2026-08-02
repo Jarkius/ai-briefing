@@ -29,3 +29,5 @@ dashboard's live research) and folds findings into the newsletter as a
 - [x] Use Codex remotely: Mobile access can continue tasks through your computer, although the computer must remain awake. (researched 2026-07-26)
 - [x] Publish interactive Sites: He demonstrates a Japan travel guide, a multiplication game for his child, and an interactive product-requirements document containing requirements, designs, components, architecture, and data models. (researched 2026-07-26)
 - [x] The central lesson is: perform a workflow manually with Codex, refine it through feedback, then convert it into a reusable skill or scheduled task. Keep human review before consequential actions such as sending email or changing the calendar. (researched 2026-07-26)
+
+- [x] https://www.youtube.com/watch?v=jNQXAC9IVRw (researched 2026-08-02)
