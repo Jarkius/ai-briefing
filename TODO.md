@@ -45,8 +45,17 @@ Code-complete; acceptance bar not fully met.
 - [x] Cross-process `data/.mcp.lock` — research job acquires inside the task; route pre-rejects via is_locked()
 - [x] In-process job registry — blocking core work via asyncio.to_thread (loop-not-blocked test); research reattaches on reload (AC7)
 - [x] Auto-commit on dashboard saves — pathspec-restricted, never bare; push stays manual
-- [ ] Remaining ACs needing manual/live proof: AC2 (LAN curl from second machine), AC5 (IMAP before/after send count), AC6 (real YouTube research run), AC7/AC8 (kill-tab / kill-server)
+- [x] AC2 **PASSED 2026-08-02**: `curl http://192.168.0.109:8787/preview` (real LAN IP, not loopback) → connection refused (exit 7); localhost `curl http://127.0.0.1:8787/preview` → 200. Confirms the panel is genuinely bound to 127.0.0.1 only.
+- [x] AC6 **PASSED 2026-08-02**: submitted a real YouTube URL via `/research/run` against the live :8787 instance — transcribed successfully, banner showed "✓ research done" with the transcript.
+- [x] AC7 **PASSED 2026-08-02**: raced a slow (non-cached) video download against an immediate `/research` page reload — the reloaded page correctly showed the live job's banner with its `hx-get`/`hx-trigger` polling attributes, proving in-flight-job reattachment works without needing the specific job URL.
+- [x] AC8 **PASSED 2026-08-02**: `kill -9` on the live panel process mid-job. Verified after restart: the pending `research_requests.md` line stayed unchecked (no corruption/partial write), and `data/.mcp.lock` released cleanly (`is_locked() == False`) despite the hard kill. Panel restarted immediately after (was in active use).
+- [ ] AC5 (IMAP before/after send count) still needs live proof — blocked right now by a separate, real issue found 2026-08-02: the Gmail API OAuth token has been revoked (`invalid_grant`) and the SMTP/IMAP fallback's app password is also stale for the current sending account, so every real send currently fails on both paths. See README "Troubleshooting → invalid_grant" — fix needs a human browser consent click (`scripts/setup_gmail_oauth.py`), cannot be automated.
 - [ ] S6 polish backlog: full letter-texture theme pass (base theme shipped), run-history table (deferred by plan)
+
+### 2026-08-02 21:xx (caffeinate fix + panel AC verification)
+- **Found + fixed a real production incident**: the 2026-08-02 05:00 scheduled run took 11+ hours (05:33→16:53) and ultimately failed to send — traced to the Mac sleeping mid-run (macOS suspends, doesn't kill, process execution on sleep; provider-call gaps of 60-90+ min are inconsistent with the code's own max-80s backoff, consistent with sleep/wake). Fixed by wrapping `ProgramArguments` in `caffeinate -i`, applied to both the repo's tracked plist and the installed `~/Library/LaunchAgents/` copy (preserved the panel-set 9:00 schedule, did not revert to the repo's stale 5:00). Verified via `launchctl start`: full run now completes in ~101s.
+- **Found (separate, still open)**: Gmail API OAuth refresh token revoked (`invalid_grant`, first appeared in logs 2026-08-01) — both the primary (API) and fallback (SMTP/IMAP, stale app password) send paths are currently broken. Documented in README; fix requires human browser consent, cannot be automated from here.
+- **Verified live**: AC2, AC6, AC7, AC8 for the control panel — all passed against the actual running :8787 instance (not just code review). See entries above.
 
 ## Housekeeping
 - [ ] Branch: work is on `poc/noapi-google-search-mcp`; plans say implement on `feat/mcp-collector` — decide whether to rename/branch before PR to `main`
