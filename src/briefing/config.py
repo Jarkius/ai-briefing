@@ -10,7 +10,12 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 ENV_PATH = os.path.join(REPO_ROOT, ".env")
 DATA_DIR = os.path.join(REPO_ROOT, "data")
 FEEDS_DB_PATH = os.path.join(DATA_DIR, "feeds.db")
+# Separate from feeds.db so workflow lifecycle writes never contend with the
+# vendored MCP server's feed-ingestion locks — see
+# .omx/plans/2026-07-31-workflow-system-redesign.md "Durable Data Model".
+WORKFLOW_DB_PATH = os.path.join(DATA_DIR, "workflow.db")
 MCP_LOCK_PATH = os.path.join(DATA_DIR, ".mcp.lock")
+WORKFLOW_LOCK_PATH = os.path.join(DATA_DIR, ".workflow.lock")
 SUBSCRIPTIONS_PATH = os.path.join(REPO_ROOT, "subscriptions.json")
 STYLE_PATH = os.path.join(REPO_ROOT, "newsletter_style.md")
 RESEARCH_REQUESTS_PATH = os.path.join(REPO_ROOT, "research_requests.md")

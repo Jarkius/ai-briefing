@@ -41,21 +41,27 @@ def store(tmp_path):
 def svc(store, monkeypatch):
     """workflow.py wired to the isolated store, with collector/researcher/
     generator/sender collaborators stubbed — no real network/AI/email calls.
-    Individual tests override these stubs to inject specific results/failures."""
+    Individual tests override these stubs to inject specific results/failures.
+
+    _generate's archive_file increments per call, mirroring the real
+    generator.py (which includes HHMMSS specifically so a cron generate and
+    a dashboard regenerate landing in the same run never collide)."""
     svc = workflow.WorkflowService(store=store)
+    counter = {"n": 0}
     monkeypatch.setattr(svc, "_collect", lambda: "ok")
     monkeypatch.setattr(svc, "_research", lambda tasks: [(t, f"finding for {t}") for t in tasks])
-    monkeypatch.setattr(
-        svc,
-        "_generate",
-        lambda research_findings: {
+
+    def fake_generate(research_findings):
+        counter["n"] += 1
+        return {
             "markdown": "# stub",
             "part1_html": "<p>one</p>",
             "part2_html": "<p>two</p>",
             "date_str": "Thursday, July 30, 2026",
-            "archive_file": "briefing_2026-07-30_0800.md",
-        },
-    )
+            "archive_file": f"briefing_2026-07-30_{counter['n']:06d}.md",
+        }
+
+    monkeypatch.setattr(svc, "_generate", fake_generate)
     monkeypatch.setattr(
         svc, "_send", lambda edition: {"part1": "sent", "part2": "sent"}
     )
@@ -197,15 +203,20 @@ def test_retry_send_reuses_persisted_html_not_a_fresh_render(svc, monkeypatch):
 # ---- Invariant 8: every transition writes one Activity row ------------------
 
 
-def test_every_transition_records_exactly_one_activity_row(svc):
+def test_send_records_one_activity_row_per_transition(svc):
+    """Send is two transitions (needs_review -> sending -> sent), so
+    invariant 8 ("every state transition records one Activity row") means
+    exactly two new rows here, not one row for the whole command."""
     edition = svc.generate_edition(trigger="manual", delivery_policy="review")
     before = len(svc.store.list_activity())
 
     svc.send_edition(edition["id"])
 
     after = svc.store.list_activity()
-    assert len(after) == before + 1
-    assert after[-1]["entity_type"] == "edition"
+    assert len(after) == before + 2
+    assert after[-2]["entity_type"] == "edition"
+    assert after[-2]["entity_id"] == edition["id"]
+    assert after[-2]["to_state"] == "sending"
     assert after[-1]["entity_id"] == edition["id"]
     assert after[-1]["to_state"] == "sent"
 
@@ -253,6 +264,22 @@ def test_run_scheduled_default_policy_is_auto_send(svc):
 
 def test_run_scheduled_review_policy_stops_before_send(svc):
     result = svc.run_scheduled(delivery_policy="review")
+    assert result["editions"][0]["state"] == "needs_review"
+
+
+def test_run_scheduled_consumes_and_folds_in_queued_research(svc):
+    """Regression: a naive implementation can mark research tasks 'running'
+    then check a stale in-memory snapshot to decide whether to mark them
+    'ready' afterward — the snapshot never reflects the 'running' write, so
+    research results silently never reach the Edition. queue -> scheduled
+    run must actually fold the findings into generate()."""
+    svc.queue_research(["quantum computing news"])
+
+    result = svc.run_scheduled(delivery_policy="review")
+
+    consumed = svc.store.list_research_tasks(state="consumed")
+    assert len(consumed) == 1
+    assert consumed[0]["result_text"] == "finding for quantum computing news"
     assert result["editions"][0]["state"] == "needs_review"
 
 
