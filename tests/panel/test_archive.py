@@ -1,5 +1,7 @@
 """Archive browser tests: listing, selection, date fidelity, path safety."""
 
+import os
+import re
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -43,8 +45,12 @@ def test_archive_page_renders_selected_with_archives_own_date(tmp_path):
 def test_archive_page_defaults_to_newest(tmp_path):
     with _archive_dir(tmp_path):
         r = client.get("/archive")
-    assert 'class="selected"' in r.text
-    assert "briefing_2026-07-25_232539.md" in r.text.split('class="selected"')[0].rsplit("href", 1)[-1]
+    # the row carrying the "selected" class must be the newest file's link —
+    # class list also carries a send-status modifier (e.g. "send-draft"),
+    # so match on the class ATTRIBUTE containing "selected", not an exact string.
+    m = re.search(r'<a href="/archive\?view=([^&"]+)[^>]*class="[^"]*\bselected\b[^"]*"', r.text)
+    assert m, "no link found with a 'selected' class"
+    assert m.group(1) == "briefing_2026-07-25_232539.md"
 
 
 def test_archive_view_rejects_path_traversal(tmp_path):
@@ -175,3 +181,69 @@ def test_invalid_calendar_date_archive_skipped_not_500(tmp_path):
     assert r.status_code == 200
     assert "briefing_2026-13-45_9999.md" not in r.text  # skipped from list
     assert "briefing_2026-07-24_0500.md" in r.text      # valid one renders
+
+
+def test_archive_timeline_links_preserve_active_filter(tmp_path):
+    """Regression: clicking a timeline entry while filtered to drafts/sent
+    used to drop the ?show= param, silently snapping back to 'all' — the
+    reported "keeps switching back to show all" bug."""
+    with _archive_dir(tmp_path):
+        r = client.get("/archive?show=drafts")
+    # every per-entry link must carry the active filter forward
+    hrefs = re.findall(r'href="(/archive\?view=[^"]+)"', r.text)
+    assert hrefs, "no archive entry links found"
+    assert all("show=drafts" in href for href in hrefs)
+
+
+def test_archive_selecting_entry_under_filter_keeps_filter_active(tmp_path):
+    with _archive_dir(tmp_path):
+        r = client.get(
+            "/archive?view=briefing_2026-07-24_0500.md&show=drafts"
+        )
+    # the "drafts" chip must still read as active after navigating to a
+    # specific entry inside that filter
+    assert re.search(r'href="/archive\?show=drafts"[^>]*class="filter-chip on"', r.text)
+
+
+def test_archive_row_carries_send_status_class(tmp_path):
+    """Regression: send status used to be a small corner badge only, easy
+    to miss when scanning — the row itself must carry a send-status class
+    so styling can make 'already sent' vs 'draft' visually unmistakable."""
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)), \
+         patch("panel.app.db.load_send_status", return_value={}):
+        r = client.get("/archive")
+    assert re.search(r'class="archive-row send-draft', r.text)
+
+
+def test_archive_detail_pane_shows_explicit_send_status_pill(tmp_path):
+    """Regression: 'which one can I resend, which one already went out'
+    was only answered inside a native confirm() dialog after clicking Send.
+    The detail pane must state it plainly before any click."""
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)), \
+         patch("panel.app.db.load_send_status", return_value={}):
+        r = client.get("/archive?view=briefing_2026-07-24_0500.md")
+    assert "draft — not sent yet" in r.text
+
+    send_log = {"briefing_2026-07-24_0500.md": {"status": "sent", "detail": {}, "at": "2026-07-25T06:01:00"}}
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)), \
+         patch("panel.app.db.load_send_status", return_value=send_log):
+        r = client.get("/archive?view=briefing_2026-07-24_0500.md")
+    assert "already sent" in r.text
+
+
+def test_date_headers_are_not_sticky(tmp_path):
+    """Regression: every date-group header used position:sticky top:0,
+    so scrolling past group N made group N+1's header overlap/replace it —
+    the reported 'date time pane got overlapped' bug. Assert against the
+    stylesheet since this is a rendering property, not markup."""
+    css_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "src", "panel", "static", "panel.css",
+    )
+    with open(css_path) as f:
+        css = f.read()
+    datehead_rule = re.search(r"\.a-datehead\s*\{[^}]*\}", css)
+    assert datehead_rule, "no .a-datehead rule found"
+    assert "sticky" not in datehead_rule.group(0)

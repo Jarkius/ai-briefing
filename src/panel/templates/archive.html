@@ -25,14 +25,14 @@
     {% if loop.first or e.date != loop.previtem.date %}
     <span class="a-datehead">{{ e.date }}</span>
     {% endif %}
-    <a href="/archive?view={{ e.file }}"
-       class="{{ 'selected' if selected and e.file == selected.file else '' }}">
+    <a href="/archive?view={{ e.file }}&show={{ show }}"
+       class="archive-row send-{{ e.send_status if e.send_status else 'draft' }} {{ 'selected' if selected and e.file == selected.file else '' }}">
       <span class="a-time mono">{{ e.time }}</span>
       <span class="a-badges">
-        {%- if e.send_status == 'sent' %}<span class="badge-sent" title="emailed {{ e.sent_at }}">✉ sent</span>
-        {%- elif e.send_status == 'error' %}<span class="badge-senderr" title="send failed {{ e.sent_at }}">✉ failed</span>
-        {%- elif e.send_status == 'partial' %}<span class="badge-senderr" title="partially sent {{ e.sent_at }}">✉ partial</span>
-        {%- else %}<span class="badge-unsent" title="generated but never emailed — open it and click 'Send this edition'">draft</span>
+        {%- if e.send_status == 'sent' %}<span class="badge-sent" title="emailed {{ e.sent_at }}">✓ sent</span>
+        {%- elif e.send_status == 'error' %}<span class="badge-senderr" title="send failed {{ e.sent_at }}">✗ failed</span>
+        {%- elif e.send_status == 'partial' %}<span class="badge-senderr" title="partially sent {{ e.sent_at }}">⚠ partial</span>
+        {%- else %}<span class="badge-unsent" title="generated but never emailed — open it and click 'Send this edition'">○ draft</span>
         {%- endif %}
         {%- if e.research %}<span class="badge-research" title="research: {{ e.research | join(', ') }}">🔍</span>{% endif %}
       </span>
@@ -44,6 +44,15 @@
     <div class="page-head">
       <p class="muted">{{ parts.date_str }} — re-rendered from archived markdown with the archive's own date.</p>
       <div class="actions">
+        {% if selected.send_status == 'sent' %}
+        <span class="send-status-pill sent" title="emailed {{ selected.sent_at }}">✓ already sent</span>
+        {% elif selected.send_status == 'error' %}
+        <span class="send-status-pill err" title="{{ selected.sent_at }}">✗ send failed</span>
+        {% elif selected.send_status == 'partial' %}
+        <span class="send-status-pill err" title="{{ selected.sent_at }}">⚠ partially sent</span>
+        {% else %}
+        <span class="send-status-pill draft">○ draft — not sent yet</span>
+        {% endif %}
         <form hx-post="/archive/send" hx-target="#banner" hx-swap="innerHTML"
               hx-confirm="Email this edition ({{ selected.date }} {{ selected.time }}) to the configured recipients?{% if selected.send_status == 'sent' %} It was already sent {{ selected.sent_at }} — the dedup check will skip unless the mailbox says otherwise.{% endif %}">
           <input type="hidden" name="view" value="{{ selected.file }}">

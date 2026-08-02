@@ -116,7 +116,15 @@ main > *:nth-child(4) { animation-delay: 0.15s; }
 }
 
 .page-head { display: flex; align-items: baseline; justify-content: space-between; }
-.actions { display: flex; gap: 0.6rem; }
+.actions { display: flex; gap: 0.6rem; align-items: center; }
+.send-status-pill {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.03em;
+  padding: 0.3rem 0.7rem; border-radius: 999px; border: 1px solid;
+  white-space: nowrap;
+}
+.send-status-pill.sent { color: var(--ok); border-color: var(--ok); }
+.send-status-pill.err { color: var(--err); border-color: var(--err); }
+.send-status-pill.draft { color: var(--muted); border-color: var(--hairline-strong); }
 button {
   background: var(--panel-raised);
   color: var(--ink);
@@ -281,41 +289,65 @@ a.pending-chip:hover { border-color: var(--accent); color: var(--accent); }
 /* archive: date list left, letter view right */
 .archive-layout { display: flex; gap: 1.4rem; align-items: flex-start; }
 .archive-list {
-  flex: 0 0 240px;
-  display: flex;
-  flex-direction: column;
-  max-height: 75vh;
+  flex: 0 0 260px;
+  max-height: 80vh;
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--hairline);
   border-radius: 4px;
   background: var(--panel);
   align-self: flex-start;
 }
+/* NOT sticky: every date-head in the list previously carried `position:
+   sticky; top:0`, so as you scrolled past group N, group N+1's header
+   also snapped to top:0 and visually overlapped/replaced it — the
+   "overlapped, can't see the timeline" bug. A plain in-flow divider
+   scrolls normally; still visually distinct via the accent rule. */
 .a-datehead {
+  display: block;
   font-family: var(--mono);
   font-size: 0.68rem;
   letter-spacing: 0.1em;
   color: var(--accent);
-  padding: 0.55rem 0.8rem 0.25rem;
-  border-bottom: 1px solid var(--hairline);
+  padding: 0.6rem 0.8rem 0.3rem;
   background: var(--panel-raised);
-  position: sticky; top: 0;
+  border-top: 2px solid var(--accent);
+  border-bottom: 1px solid var(--hairline);
 }
+.a-datehead:first-child { border-top: none; }
 .archive-list a {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.45rem 0.8rem 0.45rem 1.1rem;
+  padding: 0.5rem 0.8rem 0.5rem 1.1rem;
   color: var(--muted);
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
-  border-left: 2px solid transparent;
+  border-left: 3px solid transparent;
   font-size: 0.85rem;
+  flex-wrap: wrap;
 }
-.archive-list a .a-time { min-width: 3.2rem; }
+.archive-list a .a-time { min-width: 3.2rem; flex-shrink: 0; }
 .archive-list a .a-badges { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
-.archive-list a:hover { color: var(--ink); background: rgba(224, 163, 92, 0.05); }
-.archive-list a.selected { color: var(--ink); background: #2a2932; border-left-color: var(--accent); }
+.archive-list a:hover { color: var(--ink); background: rgba(224, 163, 92, 0.08); }
+/* .selected needs to visibly win over :hover and stay legible while
+   scrolled — it's the answer to "which one am I looking at right now". */
+.archive-list a.selected,
+.archive-list a.selected:hover {
+  color: var(--ink);
+  background: rgba(224, 163, 92, 0.16);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+/* Send status colors the WHOLE row's left edge (3px, unmissable), not just
+   a tiny corner badge — answers "which ones can I still send / already
+   went out" at a glance while scanning, without reading each badge.
+   .selected overrides to accent ("you are here") since its own detail
+   pane already states the status explicitly next to the Send button. */
+.archive-row.send-draft { border-left-color: var(--muted); }
+.archive-row.send-sent { border-left-color: var(--ok); }
+.archive-row.send-error,
+.archive-row.send-partial { border-left-color: var(--err); }
 .archive-view { flex: 1; min-width: 0; }
 .archive-view > .page-head { margin-bottom: 0.4rem; }
 .badge-research { font-size: 0.75rem; }
@@ -327,7 +359,6 @@ a.pending-chip:hover { border-color: var(--accent); color: var(--accent); }
 .badge-sent { color: var(--ok); border-color: var(--ok); }
 .badge-senderr { color: var(--err); border-color: var(--err); }
 .badge-unsent { color: var(--muted); border-color: #3a3944; }
-.archive-list a { flex-wrap: wrap; }
 .in-archives { color: var(--muted); font-size: 0.8rem; margin-left: 0.4rem; }
 .in-archives a { color: var(--accent); text-decoration: none; }
 .in-archives a:hover { text-decoration: underline; }
