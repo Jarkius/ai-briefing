@@ -551,16 +551,35 @@ def test_bedrock_call_success_extracts_text():
 
     with patch.object(config, "BEDROCK_REGION", "ap-southeast-1"), \
          patch.object(config, "BEDROCK_MODEL", "global.anthropic.claude-sonnet-5"), \
+         patch.object(config, "BEDROCK_PROFILE", ""), \
          patch("anthropic.AnthropicBedrock", return_value=mock_client) as cls:
         result = _bedrock_call("sys", "user", max_attempts=3)
 
     assert result == "bedrock reply"
-    cls.assert_called_once_with(aws_region="ap-southeast-1", timeout=120.0, max_retries=0)
+    cls.assert_called_once_with(
+        aws_region="ap-southeast-1", aws_profile=None, timeout=120.0, max_retries=0
+    )
     _, kwargs = mock_client.messages.create.call_args
     assert kwargs["model"] == "global.anthropic.claude-sonnet-5"
     assert kwargs["system"] == "sys"
     assert kwargs["thinking"] == {"type": "disabled"}
     assert kwargs["messages"] == [{"role": "user", "content": "user"}]
+
+
+def test_bedrock_call_passes_named_profile_when_configured():
+    # Without this, boto3-style env-var credential resolution can silently
+    # pick up ambient AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY (e.g. set
+    # system-wide for Claude Code's own CLAUDE_CODE_USE_BEDROCK) instead of
+    # the identity this pipeline actually intends — BEDROCK_PROFILE pins it.
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = _bedrock_text_response("bedrock reply")
+
+    with patch.object(config, "BEDROCK_PROFILE", "ai-briefing"), \
+         patch("anthropic.AnthropicBedrock", return_value=mock_client) as cls:
+        _bedrock_call("sys", "user", max_attempts=3)
+
+    _, kwargs = cls.call_args
+    assert kwargs["aws_profile"] == "ai-briefing"
 
 
 def test_bedrock_call_no_text_block_raises_value_error():
