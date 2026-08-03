@@ -2,9 +2,11 @@
 {% block content %}
 <h1>Style</h1>
 <p class="muted">Rules the generator folds into every prompt (newsletter_style.md). Saves commit locally; push stays manual.</p>
-<form hx-post="/style" hx-target="#banner" hx-swap="innerHTML">
-  <textarea name="style_text" rows="18">{{ style_text }}</textarea>
-  <div class="actions" style="margin-top:0.6rem"><button type="submit">Save + commit</button></div>
-</form>
-<div id="banner"></div>
+<div class="card">
+  <form hx-post="/style" hx-target="#banner" hx-swap="innerHTML">
+    <textarea name="style_text" rows="18">{{ style_text }}</textarea>
+    <div class="actions" style="margin-top:0.8rem"><button type="submit">Save + commit</button></div>
+  </form>
+</div>
+<div id="banner" role="status" aria-live="polite"></div>
 {% endblock %}

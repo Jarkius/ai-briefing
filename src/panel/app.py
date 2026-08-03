@@ -818,11 +818,12 @@ async def logs_tail():
         for s in _phase_strip()
     )
     return HTMLResponse(
-        f'<div id="logs-live" hx-get="/logs/tail" hx-trigger="every 3s" hx-swap="outerHTML">'
+        f'<div id="logs-live" hx-get="/logs/tail" hx-trigger="every 3s" hx-swap="outerHTML" '
+        f'role="status" aria-live="polite">'
         f'<div class="phase-strip">{strip}</div>'
         f'<h2 class="muted">Dashboard jobs (this session)</h2>'
-        f'<table class="sources-table"><thead><tr><th>started</th><th>job</th><th>status</th><th>phase</th></tr></thead>'
-        f'<tbody>{jobs_rows}</tbody></table>'
+        f'<div class="table-scroll"><table class="sources-table"><thead><tr><th>started</th><th>job</th><th>status</th><th>phase</th></tr></thead>'
+        f'<tbody>{jobs_rows}</tbody></table></div>'
         f'<h2 class="muted">briefing.log (cron) — last 200 lines</h2>'
         f'<pre class="logtail">{_highlight_log(tail) or "(no log file yet)"}</pre>'
         f'</div>'
@@ -844,6 +845,7 @@ async def status():
     else:
         state, label = "idle", "idle"
     return HTMLResponse(
-        f'<span id="status-dot" class="dot dot-{state}" title="{label}" '
-        f'hx-get="/status" hx-trigger="every 3s" hx-swap="outerHTML">● {label}</span>'
+        f'<span id="status-dot" class="dot dot-{state}" title="{label}" role="status" aria-live="polite" '
+        f'hx-get="/status" hx-trigger="every 3s" hx-swap="outerHTML">'
+        f'<span class="dot-label">{label}</span></span>'
     )

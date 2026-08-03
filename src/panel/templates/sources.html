@@ -3,16 +3,19 @@
 <h1>Sources</h1>
 <p class="muted">Edits land in subscriptions.json; the pipeline reconciles (subscribes) on its next collect run — no live MCP calls from here.</p>
 
-<form hx-post="/sources" hx-target="#banner" hx-swap="innerHTML" class="add-source">
-  <select name="source_type">
-    {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-  </select>
-  <input type="text" name="identifier" placeholder="feed URL / @handle / subreddit">
-  <input type="text" name="name" placeholder="display name (required)">
-  <button type="submit">Add</button>
-</form>
-<div id="banner"></div>
+<div class="card">
+  <form hx-post="/sources" hx-target="#banner" hx-swap="innerHTML" class="add-source">
+    <select name="source_type">
+      {% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    </select>
+    <input type="text" name="identifier" placeholder="feed URL / @handle / subreddit">
+    <input type="text" name="name" placeholder="display name (required)">
+    <button type="submit">Add</button>
+  </form>
+</div>
+<div id="banner" role="status" aria-live="polite"></div>
 
+<div class="table-scroll">
 <table class="sources-table">
   <thead><tr><th>type</th><th>name</th><th>identifier</th></tr></thead>
   <tbody>
@@ -21,4 +24,5 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

@@ -6,43 +6,47 @@ localhost only — do not port-forward or expose port 8787.</div>
 
 <form hx-post="/settings" hx-target="#banner" hx-swap="innerHTML" class="settings-form" id="settings-form">
 
-  <h2 class="muted">AI providers</h2>
-  <p class="drag-hint">⠿ Drag a row (or use the ▲▼ buttons) to reorder — <strong>#1 is tried first</strong>, the rest are fallbacks in order. Remember to Save.</p>
-  <ul class="provider-list" id="provider-list">
-    {% for p in providers %}
-    <li class="provider-row" draggable="true" data-provider="{{ p.name }}">
-      <span class="grip" title="drag to reorder">⠿</span>
-      <span class="p-rank">{{ loop.index }}</span>
-      <span class="p-label">{{ p.label }}</span>
-      <span class="p-status {{ 'ok' if p.status in ('enabled', 'key set', 'installed') else 'off' }}">{{ p.status }}</span>
-      <span class="p-arrows">
-        <button type="button" class="move-up" title="move up">▲</button>
-        <button type="button" class="move-down" title="move down">▼</button>
-      </span>
-    </li>
-    {% endfor %}
-  </ul>
-
-  <h2 class="muted" style="margin-top:1.6rem">Credentials & models</h2>
-  {% for key, val in values.items() %}
-  {% if key == "CLAUDE_CLI_MODEL" %}
-  <label>{{ key }}
-    <select name="{{ key }}">
-      {% for m in cli_models %}
-      <option value="{{ m }}" {{ 'selected' if m == val else '' }}>{{ m }}</option>
+  <div class="card">
+    <h2>AI providers</h2>
+    <p class="drag-hint">Drag a row (or use the ▲▼ buttons) to reorder — <strong>#1 is tried first</strong>, the rest are fallbacks in order. Remember to Save.</p>
+    <ul class="provider-list" id="provider-list">
+      {% for p in providers %}
+      <li class="provider-row" draggable="true" data-provider="{{ p.name }}">
+        <span class="grip" aria-hidden="true" title="drag to reorder">⠿</span>
+        <span class="p-rank">{{ loop.index }}</span>
+        <span class="p-label">{{ p.label }}</span>
+        <span class="p-status {{ 'ok' if p.status in ('enabled', 'key set', 'installed') else 'off' }}">{{ p.status }}</span>
+        <span class="p-arrows">
+          <button type="button" class="move-up" title="move up" aria-label="Move {{ p.label }} up">▲</button>
+          <button type="button" class="move-down" title="move down" aria-label="Move {{ p.label }} down">▼</button>
+        </span>
+      </li>
       {% endfor %}
-    </select>
-  </label>
-  {% else %}
-  <label>{{ key }}
-    <input type="{{ 'password' if 'PASSWORD' in key or 'KEY' in key else 'text' }}"
-           name="{{ key }}" value="{{ val }}" autocomplete="off">
-  </label>
-  {% endif %}
-  {% endfor %}
-  <div class="actions" style="margin-top:0.8rem"><button type="submit">Save</button></div>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Credentials &amp; models</h2>
+    {% for key, val in values.items() %}
+    {% if key == "CLAUDE_CLI_MODEL" %}
+    <label>{{ key }}
+      <select name="{{ key }}">
+        {% for m in cli_models %}
+        <option value="{{ m }}" {{ 'selected' if m == val else '' }}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% else %}
+    <label>{{ key }}
+      <input type="{{ 'password' if 'PASSWORD' in key or 'KEY' in key else 'text' }}"
+             name="{{ key }}" value="{{ val }}" autocomplete="off">
+    </label>
+    {% endif %}
+    {% endfor %}
+    <div class="actions" style="margin-top:0.8rem"><button type="submit">Save</button></div>
+  </div>
 </form>
-<div id="banner"></div>
+<div id="banner" role="status" aria-live="polite"></div>
 
 <script>
 // Drag-to-reorder for the provider list; on submit, inject hidden inputs

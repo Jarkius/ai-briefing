@@ -2,16 +2,16 @@
 {% block content %}
 <h1>Archive</h1>
 <div class="archive-filters">
-  <a href="/archive?show=all" class="filter-chip {{ 'on' if show == 'all' }}">all</a>
-  <a href="/archive?show=sent" class="filter-chip {{ 'on' if show == 'sent' }}">✉ sent</a>
-  <a href="/archive?show=drafts" class="filter-chip {{ 'on' if show == 'drafts' }}">drafts</a>
+  <a href="/archive?show=all" class="chip {{ 'on' if show == 'all' }}">all</a>
+  <a href="/archive?show=sent" class="chip {{ 'on' if show == 'sent' }}">✉ sent</a>
+  <a href="/archive?show=drafts" class="chip {{ 'on' if show == 'drafts' }}">drafts</a>
 </div>
 {% if not_found %}
 <div class="banner banner-warn">No archived edition named “{{ not_found }}” {{ 'in this filter — try “all”' if show != 'all' else '— it may have been renamed or is on the other machine' }}.</div>
 {% endif %}
 {% if not entries %}
 <div class="empty-state">
-  <span class="empty-drop">A</span>
+  <span class="empty-drop" aria-hidden="true">∅</span>
   <div class="empty-copy">
     <p class="empty-head">The morgue file is empty.</p>
     <p class="muted">Every generated edition is archived here — scheduled or manual.
@@ -51,7 +51,7 @@
         </form>
       </div>
     </div>
-    <div id="banner"></div>
+    <div id="banner" role="status" aria-live="polite"></div>
     <section class="letter">
       <h2>Part 1 · News &amp; Learning</h2>
       <iframe class="mail-frame" srcdoc="{{ parts.part1 | e }}" sandbox=""></iframe>
