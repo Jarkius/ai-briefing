@@ -326,9 +326,15 @@ def _claude_cli_call(system: str, user: str) -> str:
 
 
 def _bedrock_call(system: str, user: str, max_attempts: int) -> str:
-    """Claude on AWS Bedrock, authenticated via the machine's AWS credentials
-    (same chain Claude Code uses under CLAUDE_CODE_USE_BEDROCK). Lazy import:
-    the anthropic SDK is only needed when this tier is enabled and reached."""
+    """Claude on AWS Bedrock. Uses config.BEDROCK_PROFILE (a named
+    ~/.aws/credentials profile) when set — otherwise falls through to the
+    SDK's default boto3-style resolution, which checks AWS_ACCESS_KEY_ID /
+    AWS_SECRET_ACCESS_KEY env vars BEFORE ~/.aws/credentials. On a machine
+    where those are set system-wide (e.g. for Claude Code's own
+    CLAUDE_CODE_USE_BEDROCK), that identity silently wins over whatever
+    profile this pipeline actually intends — set BEDROCK_PROFILE to pin it.
+    Lazy import: the anthropic SDK is only needed when this tier is enabled
+    and reached."""
     from anthropic import AnthropicBedrock
 
     # Hard per-request ceiling: the SDK's defaults (600s read timeout ×
@@ -337,7 +343,10 @@ def _bedrock_call(system: str, user: str, max_attempts: int) -> str:
     # run for ~4h, never reaching Send. A newsletter section takes ~5-30s;
     # 120s is generous. SDK retries off — this function owns retrying.
     client = AnthropicBedrock(
-        aws_region=config.BEDROCK_REGION, timeout=120.0, max_retries=0
+        aws_region=config.BEDROCK_REGION,
+        aws_profile=config.BEDROCK_PROFILE or None,
+        timeout=120.0,
+        max_retries=0,
     )
     last_error = None
     for attempt in range(max_attempts):
