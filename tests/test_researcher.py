@@ -8,7 +8,13 @@ import socket
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from briefing.researcher import _public_url_error, classify, parse_requests, research_one
+from briefing.researcher import (
+    _public_url_error,
+    classify,
+    deep_fetch_items,
+    parse_requests,
+    research_one,
+)
 
 
 def _allow_all_urls():
@@ -311,3 +317,84 @@ def test_run_pending_delegates_to_run_pending_async_and_returns_its_result():
     assert result == ("findings", 1)
     mock_lock.assert_called_once_with(retry_seconds=120)
     mock_run_pending_async.assert_awaited_once_with()
+
+
+# ---- deep_fetch_items ------------------------------------------------------
+
+
+def test_deep_fetch_items_skips_items_with_no_url():
+    session = AsyncMock()
+    session.call_tool.return_value = _text_result("page content")
+    items = [{"title": "no url here", "url": ""}, {"title": "has url", "url": "https://example.com/a"}]
+
+    with _allow_all_urls():
+        fetched = asyncio.run(deep_fetch_items(session, items))
+
+    assert [f["title"] for f in fetched] == ["has url"]
+    session.call_tool.assert_awaited_once_with("visit_page", {"url": "https://example.com/a"})
+
+
+def test_deep_fetch_items_skips_on_fetch_failure_no_fallback_to_stored_content():
+    session = AsyncMock()
+    session.call_tool.side_effect = RuntimeError("fetch boom")
+    items = [{"title": "broken", "url": "https://example.com/broken", "content": "stale digest text"}]
+
+    with _allow_all_urls():
+        fetched = asyncio.run(deep_fetch_items(session, items))
+
+    assert fetched == []
+
+
+def test_deep_fetch_items_skips_ssrf_refused_urls():
+    session = AsyncMock()
+    items = [{"title": "internal", "url": "http://169.254.169.254/latest/meta-data/"}]
+
+    fetched = asyncio.run(deep_fetch_items(session, items))
+
+    assert fetched == []
+    session.call_tool.assert_not_called()
+
+
+def test_deep_fetch_items_respects_max_items_cap():
+    session = AsyncMock()
+    session.call_tool.return_value = _text_result("content")
+    items = [{"title": f"item{i}", "url": f"https://example.com/{i}"} for i in range(5)]
+
+    with _allow_all_urls():
+        fetched = asyncio.run(deep_fetch_items(session, items, max_items=2))
+
+    assert len(fetched) == 2
+    assert session.call_tool.await_count == 2
+
+
+def test_deep_fetch_items_returns_title_url_content():
+    session = AsyncMock()
+    session.call_tool.return_value = _text_result("full article body")
+    items = [{"title": "An Article", "url": "https://example.com/a"}]
+
+    with _allow_all_urls():
+        fetched = asyncio.run(deep_fetch_items(session, items))
+
+    assert fetched == [{"title": "An Article", "url": "https://example.com/a", "content": "full article body"}]
+
+
+def test_deep_fetch_items_sync_delegates_through_lock_and_session():
+    from briefing import researcher
+
+    class FakeSession:
+        async def __aenter__(self):
+            return "fake-session"
+
+        async def __aexit__(self, *a):
+            return False
+
+    with patch("briefing.researcher.mcp_client.mcp_lock") as mock_lock, \
+         patch.object(researcher.mcp_client, "McpSession", FakeSession), \
+         patch(
+             "briefing.researcher.deep_fetch_items", new=AsyncMock(return_value=[{"title": "x"}])
+         ) as mock_deep_fetch:
+        result = researcher.deep_fetch_items_sync([{"title": "x", "url": "https://example.com"}], max_items=3)
+
+    assert result == [{"title": "x"}]
+    mock_lock.assert_called_once_with(retry_seconds=120)
+    mock_deep_fetch.assert_awaited_once_with("fake-session", [{"title": "x", "url": "https://example.com"}], max_items=3)

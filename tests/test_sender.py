@@ -18,7 +18,9 @@ from briefing.sender import (
     _with_retry,
     already_sent_today,
     markdown_to_html,
+    render_social_post_html,
     send_email,
+    send_social_post_email,
     send_two_part_briefing,
     split_two_parts,
 )
@@ -478,3 +480,63 @@ def test_send_two_part_briefing_both_error_when_both_fail():
          _mock_send_lock():
         result = send_two_part_briefing("<p>p1</p>", "<p>p2</p>", "31 Jul 2026")
     assert result == {"part1": "error: down", "part2": "error: down"}
+
+
+# ---- render_social_post_html -------------------------------------------------
+
+
+def test_render_social_post_html_escapes_and_preserves_line_breaks():
+    html = render_social_post_html("Line one\nLine <script>two</script>", "31 Jul 2026")
+    assert "Line one<br>\nLine &lt;script&gt;two&lt;/script&gt;" in html
+    assert "<script>" not in html
+
+
+def test_render_social_post_html_includes_date():
+    html = render_social_post_html("post body", "31 Jul 2026")
+    assert "31 Jul 2026" in html
+
+
+# ---- send_social_post_email --------------------------------------------------
+
+
+def test_send_social_post_email_sent():
+    with patch("briefing.sender.already_sent_today", return_value=False), \
+         patch("briefing.sender.send_email") as mock_send, \
+         _mock_send_lock():
+        result = send_social_post_email("<p>post</p>", "31 Jul 2026")
+    assert result == "sent"
+    mock_send.assert_called_once()
+    subject_arg = mock_send.call_args.args[0]
+    assert "31 Jul 2026" in subject_arg
+    assert "Social Post" in subject_arg
+
+
+def test_send_social_post_email_already_sent():
+    with patch("briefing.sender.already_sent_today", return_value=True), \
+         patch("briefing.sender.send_email") as mock_send, \
+         _mock_send_lock():
+        result = send_social_post_email("<p>post</p>", "31 Jul 2026")
+    assert result == "already_sent"
+    mock_send.assert_not_called()
+
+
+def test_send_social_post_email_error_on_send_failure():
+    with patch("briefing.sender.already_sent_today", return_value=False), \
+         patch("briefing.sender.send_email", side_effect=RuntimeError("smtp down")), \
+         _mock_send_lock():
+        result = send_social_post_email("<p>post</p>", "31 Jul 2026")
+    assert result == "error: smtp down"
+
+
+def test_send_social_post_email_marker_distinct_from_briefing_parts():
+    # already_sent_today's substring match must not conflate this send with
+    # the daily Part 1/Part 2 emails — a shared marker would make the dedup
+    # check skip the social post because a Part 1/2 email already went out.
+    with patch("briefing.sender.already_sent_today") as mock_check, \
+         patch("briefing.sender.send_email"), \
+         _mock_send_lock():
+        mock_check.return_value = False
+        send_social_post_email("<p>post</p>", "31 Jul 2026")
+    marker_arg = mock_check.call_args.args[0]
+    assert "Part 1" not in marker_arg
+    assert "Part 2" not in marker_arg

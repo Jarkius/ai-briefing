@@ -50,4 +50,36 @@
   </div>
 </div>
 {% endif %}
+
+<div class="social-post-cart">
+  <h2>🛒 Social Post Focus</h2>
+  <p class="muted">Optional — leave empty to build from the whole day's content (top items per section).
+  The automatic daily send always uses the whole day.</p>
+  <form hx-post="/preview/social-post" hx-target="#social-post-banner" hx-swap="innerHTML">
+    <div class="section-chips">
+      {% for i, label in social_post_sections %}
+      <label class="section-chip">
+        <input type="checkbox" name="sections" value="{{ i }}">
+        {{ label }}
+      </label>
+      {% endfor %}
+    </div>
+    <button type="submit" class="btn-send">Build social post</button>
+  </form>
+  <div id="social-post-banner"></div>
+
+  {% if social_post %}
+  <div class="letter">
+    <div class="page-head">
+      <h2>📢 Share-Ready Post — {{ social_post.date_str }}</h2>
+      <div class="actions">
+        <button type="button" class="btn-send" hx-post="/preview/social-post/send"
+                hx-target="#social-post-banner" hx-swap="innerHTML"
+                hx-confirm="Email this social post to the configured recipients now?">Send</button>
+      </div>
+    </div>
+    <pre class="findings social-post-text">{{ social_post.post_text }}</pre>
+  </div>
+  {% endif %}
+</div>
 {% endblock %}

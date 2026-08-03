@@ -81,7 +81,31 @@ def main():
             except Exception as e:
                 log(f"Send phase failed: {e}")
                 send_status = f"error: {e}"
-    db.update_run(conn, run_id, send_status=send_status, finished_at=datetime.now().isoformat())
+    db.update_run(conn, run_id, send_status=send_status)
+
+    social_post_status = "skipped"
+    if result:
+        try:
+            log("=== Phase 5: Social Post ===")
+            candidates = generator.social_post_candidate_items(conn)
+            fetched = researcher.deep_fetch_items_sync(candidates)
+            if not fetched:
+                log("Social post skipped: no fetchable sources (no URLs, or all fetches failed)")
+                social_post_status = "skipped (no fetchable sources)"
+            else:
+                source_material = generator.build_social_post_source(fetched)
+                post_text = generator.generate_social_post(source_material, result["date_str"])
+                if dry_run:
+                    print("\n=== SOCIAL POST ===\n", post_text[:1000])
+                    social_post_status = "dry_run"
+                else:
+                    post_html = sender.render_social_post_html(post_text, result["date_str"])
+                    social_post_status = sender.send_social_post_email(post_html, result["date_str"])
+                    log(f"Social post send result: {social_post_status}")
+        except Exception as e:
+            log(f"Social post phase failed (soft): {e}")
+            social_post_status = f"error: {e}"
+    db.update_run(conn, run_id, social_post_status=social_post_status, finished_at=datetime.now().isoformat())
     conn.close()
 
     log("=== Done ===")

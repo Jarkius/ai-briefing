@@ -15,6 +15,7 @@ import pytest
 from briefing import config
 from briefing.generator import (
     SECTION_PROMPTS,
+    SOCIAL_POST_STYLE_ANGLES,
     TOTAL_CHAR_BUDGET,
     TRANSCRIPT_CHAR_CAP,
     _bedrock_call,
@@ -26,9 +27,12 @@ from briefing.generator import (
     _sanitize,
     budget_items,
     build_context,
+    build_social_post_source,
     call_gemini,
     fetch_recent_items,
     generate,
+    generate_social_post,
+    social_post_candidate_items,
 )
 
 
@@ -887,3 +891,145 @@ def test_generate_passes_budgeted_items_and_research_findings_to_call_gemini(tmp
     called_items = args[0]
     assert any(i["title"] == "Item" for i in called_items)
     assert kwargs["research_findings"] == research_findings
+
+
+# ---- build_social_post_source ----------------------------------------------
+
+
+def test_build_social_post_source_includes_title_url_and_content():
+    fetched = [{"title": "An Article", "url": "https://example.com/a", "content": "full article body"}]
+    source = build_social_post_source(fetched)
+    assert "An Article" in source
+    assert "https://example.com/a" in source
+    assert "full article body" in source
+
+
+def test_build_social_post_source_joins_multiple_items():
+    fetched = [
+        {"title": "First", "url": "https://example.com/1", "content": "one"},
+        {"title": "Second", "url": "https://example.com/2", "content": "two"},
+    ]
+    source = build_social_post_source(fetched)
+    assert "First" in source and "Second" in source
+    assert source.index("First") < source.index("Second")
+
+
+def test_build_social_post_source_empty_list_gives_empty_string():
+    assert build_social_post_source([]) == ""
+
+
+# ---- generate_social_post ----------------------------------------------------
+
+
+def test_generate_social_post_raises_on_empty_source_material():
+    with pytest.raises(ValueError):
+        generate_social_post("", "Thursday, July 30, 2026")
+
+
+def test_generate_social_post_raises_on_whitespace_only_source_material():
+    with pytest.raises(ValueError):
+        generate_social_post("   \n  ", "Thursday, July 30, 2026")
+
+
+def test_generate_social_post_delegates_to_grok_call_with_source_material():
+    with patch("briefing.generator._grok_call", return_value="post text") as grok:
+        result = generate_social_post("=== Article ===\nSource: https://x\n\nbody", "Thursday, July 30, 2026")
+
+    assert result == "post text"
+    grok.assert_called_once()
+    system_arg, user_arg = grok.call_args.args
+    assert "LinkedIn" in system_arg
+    assert "body" in user_arg
+    assert "Thursday, July 30, 2026" in user_arg
+
+
+def test_generate_social_post_picks_one_of_three_style_angles():
+    seen_labels = set()
+    with patch("briefing.generator._grok_call") as grok:
+        grok.side_effect = lambda system, user: user  # echo the prompt back
+        for _ in range(30):
+            user_prompt = generate_social_post("source material here", "date")
+            for label, instructions in SOCIAL_POST_STYLE_ANGLES:
+                if instructions in user_prompt:
+                    seen_labels.add(label)
+                    break
+
+    # 30 random draws across 3 angles should hit more than just one, without
+    # this test depending on any single specific angle being chosen
+    assert len(seen_labels) > 1
+
+
+def test_generate_social_post_sanitizes_source_material():
+    with patch("briefing.generator._grok_call", return_value="post text") as grok:
+        generate_social_post("visit https://bare-url.example for the 0-day exploit", "date")
+
+    _, user_arg = grok.call_args.args
+    assert "https://bare-url.example" not in user_arg
+    assert "[security-related]" in user_arg
+
+
+# ---- social_post_candidate_items --------------------------------------------
+
+
+def _insert_ordered_items(conn, count):
+    """Insert `count` items, each newer than the last (item0 = newest), so
+    fetch_recent_items -> budget_items preserves this index order (same
+    source_type/priority tier = stable sort keeps insertion order). Minutes,
+    not hours — fetch_recent_items' default 24h window would silently drop
+    anything past item23 if spaced an hour apart."""
+    for i in range(count):
+        conn.execute(
+            "INSERT INTO feed_items (title, content, url, source_type, published_at, fetched_at) "
+            "VALUES (?, 'c', 'http://x', 'news', '2026-07-30', datetime('now', ?))",
+            (f"item{i}", f"-{i + 1} minutes"),
+        )
+    conn.commit()
+
+
+def test_social_post_candidate_items_unattended_path_caps_per_section(tmp_path):
+    conn = _connect_feeds_db(tmp_path)
+    _insert_ordered_items(conn, 30)  # 5 per section (30 / 6), capped to 3 by default
+
+    candidates = social_post_candidate_items(conn)
+
+    # section 0 = indices 0, 6, 12, 18, 24 -> capped to the first 3: 0, 6, 12
+    section0_titles = [c["title"] for c in candidates if c["title"] in ("item0", "item6", "item12", "item18", "item24")]
+    assert section0_titles == ["item0", "item6", "item12"]
+    # every section contributed at most 3 items -> 6 sections * 3 = 18 total
+    assert len(candidates) == 18
+
+
+def test_social_post_candidate_items_respects_custom_max_per_section(tmp_path):
+    conn = _connect_feeds_db(tmp_path)
+    _insert_ordered_items(conn, 30)
+
+    candidates = social_post_candidate_items(conn, max_items_per_section=1)
+
+    assert len(candidates) == len(SECTION_PROMPTS)  # exactly 1 per section
+
+
+def test_social_post_candidate_items_manual_selection_is_uncapped(tmp_path):
+    conn = _connect_feeds_db(tmp_path)
+    _insert_ordered_items(conn, 30)
+
+    candidates = social_post_candidate_items(conn, section_indices=[0])
+
+    # section 0's full slice (indices 0, 6, 12, 18, 24), NOT capped to 3 —
+    # a human picked this section and is waiting on the result
+    assert [c["title"] for c in candidates] == ["item0", "item6", "item12", "item18", "item24"]
+
+
+def test_social_post_candidate_items_manual_selection_multiple_sections(tmp_path):
+    conn = _connect_feeds_db(tmp_path)
+    _insert_ordered_items(conn, 12)  # 2 per section
+
+    candidates = social_post_candidate_items(conn, section_indices=[0, 1])
+
+    titles = {c["title"] for c in candidates}
+    assert titles == {"item0", "item6", "item1", "item7"}
+
+
+def test_social_post_candidate_items_empty_when_no_feed_items(tmp_path):
+    conn = _connect_feeds_db(tmp_path)
+    conn.commit()
+    assert social_post_candidate_items(conn) == []

@@ -60,6 +60,9 @@ def _ensure_runs_table(conn: sqlite3.Connection):
             error_text TEXT
         );
     """)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    if "social_post_status" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN social_post_status TEXT")
     conn.commit()
 
 

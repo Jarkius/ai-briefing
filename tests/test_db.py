@@ -44,6 +44,50 @@ def test_connect_creates_data_dir_and_configures_connection(tmp_path):
 
         busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
         assert busy_timeout == 15000
+
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        assert "social_post_status" in columns
+    finally:
+        conn.close()
+
+
+def test_connect_migrates_pre_existing_runs_table_missing_social_post_status(tmp_path):
+    from unittest.mock import patch
+
+    from briefing import db as bdb
+
+    data_dir = tmp_path / "existingdata"
+    data_dir.mkdir()
+    db_path = data_dir / "feeds.db"
+    # Simulate a database created before social_post_status existed.
+    pre_existing = sqlite3.connect(db_path)
+    pre_existing.executescript("""
+        CREATE TABLE runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            collect_status TEXT,
+            research_status TEXT,
+            generate_status TEXT,
+            send_status TEXT,
+            error_text TEXT
+        );
+    """)
+    pre_existing.execute("INSERT INTO runs (source, started_at) VALUES ('cron', '2026-07-01T00:00:00')")
+    pre_existing.commit()
+    pre_existing.close()
+
+    with patch.object(bdb.config, "DATA_DIR", str(data_dir)), \
+         patch.object(bdb.config, "FEEDS_DB_PATH", str(db_path)):
+        conn = bdb.connect()
+    try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        assert "social_post_status" in columns
+        # the pre-existing row survives the migration untouched
+        row = conn.execute("SELECT * FROM runs WHERE source = 'cron'").fetchone()
+        assert row["started_at"] == "2026-07-01T00:00:00"
+        assert row["social_post_status"] is None
     finally:
         conn.close()
 
@@ -105,7 +149,8 @@ def _ensure_runs_table(conn):
             research_status TEXT,
             generate_status TEXT,
             send_status TEXT,
-            error_text TEXT
+            error_text TEXT,
+            social_post_status TEXT
         );
         """
     )
@@ -123,6 +168,17 @@ def test_insert_run_and_update_run(tmp_path):
     assert row["source"] == "cron"
     assert row["send_status"] == "sent"
     assert row["finished_at"] == "2026-07-23T08:05:00"
+
+
+def test_insert_run_and_update_run_social_post_status(tmp_path):
+    conn = _connect(tmp_path)
+    _ensure_runs_table(conn)
+
+    run_id = insert_run(conn, source="cron", started_at="2026-07-23T08:00:00")
+    update_run(conn, run_id, social_post_status="sent")
+
+    row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+    assert row["social_post_status"] == "sent"
 
 
 def test_latest_phase_status_returns_most_recent_non_null(tmp_path):

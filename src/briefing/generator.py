@@ -11,6 +11,7 @@ findings > news/HN > GitHub/arXiv > YouTube transcripts.
 
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -571,6 +572,112 @@ def call_gemini(items: list[dict], date: str, style: str, research_findings: str
     with ThreadPoolExecutor(max_workers=3) as pool:
         parts = list(pool.map(_one_section, range(len(SECTION_PROMPTS))))
     return "\n\n---\n\n".join(parts)
+
+
+# ---- social post (3rd email) -----------------------------------------------
+
+SOCIAL_POST_SYSTEM_PROMPT = (
+    "You write LinkedIn posts for AI/software engineering audiences. Source material may be "
+    "in any language (Thai, English, or mixed) — extract the core facts, statistics, and events, "
+    "then discard the original phrasing entirely and write a completely new English post. Do not "
+    "translate sentence-by-sentence. Ground every claim in the provided source material; never "
+    "invent facts, numbers, or projects not present in it."
+)
+
+# Each angle is a self-contained structural instruction — one is chosen at
+# random per call so daily auto-posts don't all read the same way.
+SOCIAL_POST_STYLE_ANGLES = [
+    (
+        "tech-leadership",
+        "STYLE: Tech-Leadership & Business Value. Lead with a bold ALL-CAPS hook contrasting "
+        "the status quo vs. advanced execution. Follow with 2-3 sections, each headed by an "
+        "ALL-CAPS title preceded by a high-impact emoji (e.g. '📈 BUSINESS VALUE PILLARS', "
+        "'⚙️ ARCHITECTURAL STRENGTHS').",
+    ),
+    (
+        "deep-tech",
+        "STYLE: Deep-Tech & Developer Hook. Start with a hard engineering reality-check hook. "
+        "Use sequential numbered emojis (1️⃣, 2️⃣, 3️⃣) to break down technical pillars. Focus "
+        "heavily on infrastructure, scalability, and code-level mechanisms.",
+    ),
+    (
+        "punchy",
+        "STYLE: Short, Punchy & Conversational. Start with a strong, disruptive 1-2 sentence "
+        "hook. Break down the core value and use cases with tight, minimalist bullet points. "
+        "End with a high-impact closing statement.",
+    ),
+]
+
+SOCIAL_POST_FORMAT_RULES = """FORMATTING RULES:
+- No markdown bolding (**) anywhere — it breaks on social platforms.
+- Every section heading is ALL-CAPS preceded by one relevant emoji.
+- Body bullets use 🔹 or ▪️ leading emojis, one per line, never a trailing emoji.
+- Trailing emojis are ONLY allowed on the hook line and the call-to-action line.
+- Frequent line breaks — short, scannable lines, not dense paragraphs.
+- Avoid generic AI fluff ("Revolutionary!", "Game-changer!"); name concrete mechanisms instead.
+- If the source material contains a github.com link, include it on its own line at the very
+  bottom as "🔗 GITHUB REPO: <url>". If no github.com link is present, omit that line entirely.
+- End with a one-line call-to-action (trailing emoji allowed) and then 4-5 relevant hashtags.
+- After the post text, on its own line, output a copy-paste-ready image-generation prompt
+  formatted exactly as: "🔗 IMAGE PROMPT: <one paragraph>". Style it as a minimalist abstract
+  3D render / technical diagram aesthetic / cinematic data-visualization — no cartoon styles,
+  and the described image must contain no text, letters, or numbers."""
+
+
+DEFAULT_MAX_ITEMS_PER_SECTION_FOR_SOCIAL_POST = 3
+
+
+def social_post_candidate_items(
+    conn, section_indices: list[int] | None = None, max_items_per_section: int = DEFAULT_MAX_ITEMS_PER_SECTION_FOR_SOCIAL_POST,
+) -> list[dict]:
+    """Pick which feed items to deep-fetch for the social post, using the
+    same budgeted/prioritized pool and per-section slicing as call_gemini so
+    "section 2" here means the same content as the digest's section 2.
+
+    section_indices=None (the unattended daily path): take the top
+    max_items_per_section items from EVERY section — deep-fetching every
+    item across all 6 sections would make the automatic 3-email send too
+    slow. section_indices=[...] (a manual pick from the panel): take every
+    item in just those sections, uncapped — a human chose that focus and is
+    waiting on the result, not a schedule."""
+    items = budget_items(fetch_recent_items(conn))
+    section_count = len(SECTION_PROMPTS)
+    selected = section_indices if section_indices is not None else range(section_count)
+
+    candidates = []
+    for i in selected:
+        slice_items = items[i::section_count]
+        if section_indices is None:
+            slice_items = slice_items[:max_items_per_section]
+        candidates.extend(slice_items)
+    return candidates
+
+
+def build_social_post_source(fetched_items: list[dict]) -> str:
+    """Assemble deep-fetched source material into the block generate_social_post
+    reads facts from. Each item must already carry {'title', 'url', 'content'}
+    (see researcher.deep_fetch_items) — items with no URL or a failed fetch
+    are the caller's responsibility to have excluded already."""
+    blocks = []
+    for item in fetched_items:
+        blocks.append(f"=== {item['title']} ===\nSource: {item['url']}\n\n{item['content'][:4000]}")
+    return "\n\n".join(blocks)
+
+
+def generate_social_post(source_material: str, date_str: str) -> str:
+    """Generate one share-ready social post from deep-fetched source material
+    (see build_social_post_source) — never from the daily digest's own thin
+    bullet summaries, which are already too condensed to re-condense again.
+    Raises ValueError if given no material to work from."""
+    if not source_material.strip():
+        raise ValueError("no source material for social post")
+
+    _, style_instructions = random.choice(SOCIAL_POST_STYLE_ANGLES)
+    user_prompt = (
+        f"Today is {date_str}.\n\nSOURCE MATERIAL:\n{_sanitize(source_material)}\n\n"
+        f"{style_instructions}\n\n{SOCIAL_POST_FORMAT_RULES}"
+    )
+    return _grok_call(SOCIAL_POST_SYSTEM_PROMPT, user_prompt)
 
 
 def generate(conn, research_findings: str = "") -> dict:

@@ -180,6 +180,46 @@ def run_pending() -> tuple[str, int]:
         return asyncio.run(run_pending_async())
 
 
+async def deep_fetch_items(session, items: list[dict], max_items: int | None = None, phase_cb=None) -> list[dict]:
+    """Fetch full source pages for feed items, for social-post material with
+    more substance than the digest's one-line summaries. Items with no `url`,
+    or whose fetch fails, are skipped entirely rather than falling back to
+    the thin stored content — a fallback would just re-condense the same
+    shallow text the digest already produced."""
+    candidates = [item for item in items if item.get("url")]
+    if max_items is not None:
+        candidates = candidates[:max_items]
+
+    fetched = []
+    for item in candidates:
+        url = item["url"]
+        refusal = _public_url_error(url)
+        if refusal:
+            log(f"Skipping {url}: {refusal}")
+            continue
+        if phase_cb:
+            phase_cb(f"fetching {item.get('title', url)[:60]}…")
+        try:
+            result = await session.call_tool("visit_page", {"url": url})
+            content = mcp_client.tool_text(result)
+        except Exception as e:
+            log(f"Skipping {url}: fetch failed ({e})")
+            continue
+        fetched.append({"title": item.get("title", ""), "url": url, "content": content})
+    return fetched
+
+
+def deep_fetch_items_sync(items: list[dict], max_items: int | None = None) -> list[dict]:
+    """Sync entrypoint mirroring run_pending()'s lock posture, for callers
+    (generator.py, the CLI) that aren't already inside an McpSession."""
+    async def _run():
+        async with mcp_client.McpSession() as session:
+            return await deep_fetch_items(session, items, max_items=max_items)
+
+    with mcp_client.mcp_lock(retry_seconds=120):
+        return asyncio.run(_run())
+
+
 if __name__ == "__main__":
     findings, count = run_pending()
     log(f"Processed {count} request(s)")

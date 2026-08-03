@@ -57,7 +57,11 @@ async def preview(request: Request):
         "drafts": sum(1 for e in _list_archives() if not e["send_status"]),
     }
     return templates.TemplateResponse(
-        request, "preview.html", {"active": "preview", "gen": gen, "pending": pending}
+        request, "preview.html", {
+            "active": "preview", "gen": gen, "pending": pending,
+            "social_post": state.get_social_post(),
+            "social_post_sections": list(enumerate(SOCIAL_POST_SECTION_LABELS)),
+        }
     )
 
 
@@ -131,6 +135,77 @@ async def preview_send():
     return HTMLResponse(_job_fragment(job_id))
 
 
+# Short editor-facing labels for the section checkboxes — SECTION_PROMPTS'
+# own labels ("1/6: top stories + news") are dev-facing call-order markers.
+SOCIAL_POST_SECTION_LABELS = [
+    "Top Stories & News",
+    "Governance & Mindset",
+    "Learning & Best Practices",
+    "Security & Ethics",
+    "Research & Tools",
+    "Technical Deep-Dive",
+]
+
+
+def _social_post_job(section_indices: list[int]) -> dict:
+    """Blocking: deep-fetch source items for the given sections (empty list
+    = every section, capped per-section — see
+    generator.social_post_candidate_items), then generate one social post.
+    Raises if nothing was fetchable, so the job surfaces as a clear error
+    banner instead of silently producing a post from thin air."""
+    conn = db.connect()
+    try:
+        candidates = generator.social_post_candidate_items(
+            conn, section_indices=section_indices or None,
+        )
+    finally:
+        conn.close()
+    fetched = researcher.deep_fetch_items_sync(candidates)
+    if not fetched:
+        raise RuntimeError(
+            "no fetchable sources in this selection (no URLs, or all fetches failed) — "
+            "try a different section"
+        )
+    source_material = generator.build_social_post_source(fetched)
+    now = datetime.now()
+    # No %-d (glibc/BSD-only, raises on Windows) — same construction as
+    # generator.generate()'s date_str.
+    date_str = f"{now.strftime('%A, %B')} {now.day}, {now.year}"
+    post_text = generator.generate_social_post(source_material, date_str)
+    result = {"post_text": post_text, "date_str": date_str}
+    state.set_social_post(result)
+    return result
+
+
+def _social_post_send_job() -> str:
+    """Blocking: send the last generated social post."""
+    post = state.get_social_post()
+    if post is None:
+        raise RuntimeError("nothing generated yet — build a social post first")
+    post_html = sender.render_social_post_html(post["post_text"], post["date_str"])
+    return sender.send_social_post_email(post_html, post["date_str"])
+
+
+@app.post("/preview/social-post", response_class=HTMLResponse)
+async def preview_social_post(sections: list[int] = Form([])):
+    existing = jobs.running_job("social-post")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_sync("social-post", _social_post_job, sections)
+    return HTMLResponse(_job_fragment(job_id))
+
+
+@app.post("/preview/social-post/send", response_class=HTMLResponse)
+async def preview_social_post_send():
+    if state.get_social_post() is None:
+        return HTMLResponse('<div class="banner banner-err">Nothing generated yet — build a social post first.</div>')
+    existing = jobs.running_job("social-post-send")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_sync("social-post-send", _social_post_send_job)
+    return HTMLResponse(_job_fragment(job_id))
+
+
 def _job_fragment(job_id: str) -> str:
     """Polling fragment: keeps hx-trigger while running; terminal renders
     drop the attribute, which is how htmx polling stops."""
@@ -164,6 +239,18 @@ def _job_fragment(job_id: str) -> str:
             '<div class="banner banner-ok" hx-get="/preview" hx-trigger="load delay:1s" '
             'hx-target="body" hx-swap="innerHTML">✓ regenerated — refreshing preview…</div>'
         )
+    if job.name == "social-post":
+        return (
+            '<div class="banner banner-ok" hx-get="/preview" hx-trigger="load delay:1s" '
+            'hx-target="body" hx-swap="innerHTML">✓ social post ready — refreshing preview…</div>'
+        )
+    if job.name == "social-post-send" and isinstance(job.result, str):
+        result = job.result
+        if result.startswith("error"):
+            return f'<div class="banner banner-err">✗ social post send failed: {html_lib.escape(result)}</div>'
+        css = "banner-warn" if result == "already_sent" else "banner-ok"
+        note = "already sent today" if result == "already_sent" else "sent"
+        return f'<div class="banner {css}">✓ social post {note}</div>'
     if job.name == "research" and isinstance(job.result, str):
         findings = html_lib.escape(job.result)
         return (
