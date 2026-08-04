@@ -11,21 +11,50 @@ Usage:
 """
 
 import os
+import socket
 import sys
+import time
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
 from briefing import collector, config, db, generator, researcher, sender  # noqa: E402
 
+NETWORK_WAIT_TIMEOUT_SECONDS = 45
+NETWORK_WAIT_POLL_INTERVAL_SECONDS = 3
+
 
 def log(msg: str):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 
+def wait_for_network(timeout: int = NETWORK_WAIT_TIMEOUT_SECONDS) -> bool:
+    """Poll for real outbound connectivity before starting the pipeline.
+
+    launchd's StartCalendarInterval can fire during macOS DarkWake, where the
+    CPU is up but WiFi hasn't reassociated yet — the first provider calls
+    fail with connection errors even though the fallback chain recovers a
+    few seconds later. Waiting here closes that gap instead of relying on
+    every downstream provider's own retry logic to absorb it.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("1.1.1.1", 443), timeout=3):
+                return True
+        except OSError:
+            time.sleep(NETWORK_WAIT_POLL_INTERVAL_SECONDS)
+    return False
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
     config.require_env()
+
+    if wait_for_network():
+        log("Network check: ok")
+    else:
+        log(f"Network check: no connectivity after {NETWORK_WAIT_TIMEOUT_SECONDS}s — proceeding anyway")
 
     conn = db.connect()
     run_id = db.insert_run(conn, source="cron", started_at=datetime.now().isoformat())

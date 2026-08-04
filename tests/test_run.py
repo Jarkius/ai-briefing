@@ -58,6 +58,7 @@ def rec(monkeypatch):
     # MagicMock conn behaving like a real sqlite connection.
     monkeypatch.setattr(run.generator, "social_post_candidate_items", lambda conn: [])
     monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", lambda items, max_items=None: [])
+    monkeypatch.setattr(run, "wait_for_network", lambda: True)
     return r
 
 
@@ -356,6 +357,60 @@ def test_main_skips_record_send_status_when_no_archive_file(rec, monkeypatch):
     run.main()
 
     rec.record_send_status.assert_not_called()
+
+
+# ---- wait_for_network ---------------------------------------------------------
+
+
+def test_wait_for_network_true_on_first_successful_connection(monkeypatch):
+    monkeypatch.setattr(run.socket, "create_connection", MagicMock())
+    assert run.wait_for_network(timeout=5) is True
+
+
+def test_wait_for_network_false_when_connection_always_fails(monkeypatch):
+    monkeypatch.setattr(run.socket, "create_connection", MagicMock(side_effect=OSError("unreachable")))
+    monkeypatch.setattr(run.time, "sleep", lambda seconds: None)
+    assert run.wait_for_network(timeout=1) is False
+
+
+def test_wait_for_network_recovers_after_transient_failure(monkeypatch):
+    attempts = [OSError("unreachable"), MagicMock()]
+
+    def fake_create_connection(*args, **kwargs):
+        result = attempts.pop(0)
+        if isinstance(result, OSError):
+            raise result
+        return result
+
+    monkeypatch.setattr(run.socket, "create_connection", fake_create_connection)
+    monkeypatch.setattr(run.time, "sleep", lambda seconds: None)
+    assert run.wait_for_network(timeout=10) is True
+
+
+def test_main_logs_network_check_ok(rec, monkeypatch, capsys):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    monkeypatch.setattr(run.generator, "generate", lambda conn, research_findings="": _generate_result())
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", lambda p1, p2, d: {"part1": "sent", "part2": "sent"})
+
+    run.main()
+
+    assert "Network check: ok" in capsys.readouterr().out
+
+
+def test_main_logs_and_continues_when_network_check_fails(rec, monkeypatch, capsys):
+    monkeypatch.setattr(run, "wait_for_network", lambda: False)
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    monkeypatch.setattr(run.generator, "generate", lambda conn, research_findings="": _generate_result())
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", lambda p1, p2, d: {"part1": "sent", "part2": "sent"})
+
+    run.main()
+
+    out = capsys.readouterr().out
+    assert "no connectivity" in out
+    # the pipeline still runs to completion despite the failed check
+    assert rec.status_for("send_status") == "{'part1': 'sent', 'part2': 'sent'}"
 
 
 # ---- Phase 5: social post -----------------------------------------------------
