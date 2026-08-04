@@ -420,7 +420,7 @@ def test_archive_send_job_records_error_status(tmp_path):
 # ---- _regenerate_job exception branch --------------------------------------------
 
 
-def test_regenerate_job_sets_error_status_and_reraises(tmp_path):
+def test_regenerate_job_sets_error_status_and_reraises(tmp_path, research_db):
     import sqlite3
 
     import pytest

@@ -11,6 +11,10 @@ ENV_PATH = os.path.join(REPO_ROOT, ".env")
 DATA_DIR = os.path.join(REPO_ROOT, "data")
 FEEDS_DB_PATH = os.path.join(DATA_DIR, "feeds.db")
 MCP_LOCK_PATH = os.path.join(DATA_DIR, ".mcp.lock")
+# Separate from feeds.db (vendored-owned) and from the future workflow.db —
+# a narrow durable slice covering only panel-submitted research tasks. See
+# src/briefing/research_store.py.
+RESEARCH_TASKS_DB_PATH = os.path.join(DATA_DIR, "research_tasks.db")
 SUBSCRIPTIONS_PATH = os.path.join(REPO_ROOT, "subscriptions.json")
 STYLE_PATH = os.path.join(REPO_ROOT, "newsletter_style.md")
 RESEARCH_REQUESTS_PATH = os.path.join(REPO_ROOT, "research_requests.md")

@@ -16,12 +16,6 @@ LAST_GENERATION: dict | None = None  # generate()'s return dict, verbatim
 # sources, not the daily digest's markdown, and has its own send button.
 LAST_SOCIAL_POST: dict | None = None
 
-# Findings text from the last completed dashboard research job. The next
-# dashboard Regenerate folds this into generate(research_findings=...) —
-# same as run.py's research→generate handoff — then clears it so a later
-# regenerate doesn't repeat a stale "Requested Research" section.
-LAST_RESEARCH_FINDINGS: str = ""
-
 # Mutations come from both the event loop and to_thread worker threads —
 # real OS threads, so read-modify-write on the globals needs a real lock
 # (a double-clicked Regenerate could otherwise split pop into two reads).
@@ -46,21 +40,3 @@ def set_social_post(result: dict) -> None:
 
 def get_social_post() -> dict | None:
     return LAST_SOCIAL_POST
-
-
-def add_research_findings(text: str) -> None:
-    """Append a findings block — used by BOTH the paste form and completed
-    research jobs. Append-only by design: a research job finishing must not
-    clobber material the user pasted while it ran (and vice versa)."""
-    global LAST_RESEARCH_FINDINGS
-    with _LOCK:
-        LAST_RESEARCH_FINDINGS = (
-            f"{LAST_RESEARCH_FINDINGS}\n\n{text}" if LAST_RESEARCH_FINDINGS else text
-        )
-
-
-def pop_research_findings() -> str:
-    global LAST_RESEARCH_FINDINGS
-    with _LOCK:
-        text, LAST_RESEARCH_FINDINGS = LAST_RESEARCH_FINDINGS, ""
-    return text
