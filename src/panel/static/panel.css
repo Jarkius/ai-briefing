@@ -384,16 +384,23 @@ a.chip:hover { color: var(--text); border-color: var(--accent); }
   background: var(--surface);
   align-self: flex-start;
 }
+/* NOT sticky: every date-head previously carried `position: sticky; top:
+   0`, so scrolling past group N made group N+1's header snap to the same
+   position and visually overlap/replace it — unreadable with 9+ date
+   groups in a real archive. A plain in-flow divider scrolls normally;
+   still visually distinct via the top accent border. */
 .a-datehead {
+  display: block;
   font-family: var(--mono);
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   color: var(--accent);
   padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  border-top: 2px solid var(--accent);
   border-bottom: 1px solid var(--border);
   background: var(--surface-raised);
-  position: sticky; top: 0;
 }
+.a-datehead:first-child { border-top: none; }
 .archive-list a {
   display: flex;
   align-items: center;
