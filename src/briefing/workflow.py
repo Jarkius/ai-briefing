@@ -291,17 +291,32 @@ class WorkflowService:
     # ---- send commands ------------------------------------------------
 
     def send_edition(self, edition_id: int) -> dict:
-        self.store.mark_edition_sending(edition_id)  # raises InvalidTransitionError if not eligible
-        edition = self.store.get_edition(edition_id)
-        try:
-            send_result = self._send(edition)
-        except Exception as e:
-            send_result = {"part1": f"error: {e}", "part2": f"error: {e}"}
+        """Serialized by the workflow lock for its full duration (invariant
+        1) — `mark_edition_sending`'s own state check is read-then-write
+        with no transaction wrapping the pair, so two concurrent send
+        commands for the same Edition could both read 'needs_review' before
+        either writes 'sending', and both would proceed to send. Holding
+        the lock across the external send too (not just the transition)
+        keeps the system-wide invariant simple: only one send is ever in
+        flight. The store writes themselves stay short (each commits
+        immediately); only the network call in between is long-running.
 
-        if set(send_result.values()) <= SEND_OK_STATES:
-            self.store.mark_edition_sent(edition_id, send_result)
-        else:
-            self.store.mark_edition_send_failed(edition_id, send_result)
+        This method is only ever called from outside an existing
+        self._lock() block — generate_edition/run_scheduled call it after
+        their own `with self._lock():` has already exited — so this never
+        nests (WorkflowLockHeldError would otherwise fire on re-entry)."""
+        with self._lock():
+            self.store.mark_edition_sending(edition_id)  # raises InvalidTransitionError if not eligible
+            edition = self.store.get_edition(edition_id)
+            try:
+                send_result = self._send(edition)
+            except Exception as e:
+                send_result = {"part1": f"error: {e}", "part2": f"error: {e}"}
+
+            if set(send_result.values()) <= SEND_OK_STATES:
+                self.store.mark_edition_sent(edition_id, send_result)
+            else:
+                self.store.mark_edition_send_failed(edition_id, send_result)
         return self._hydrate(self.store.get_edition(edition_id))
 
     def retry_send(self, edition_id: int) -> dict:

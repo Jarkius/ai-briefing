@@ -92,6 +92,67 @@ def test_only_one_mutating_run_holds_the_workflow_lock(svc, monkeypatch):
     assert entered_generate == [True]
 
 
+def test_send_edition_holds_the_workflow_lock_for_its_full_duration(svc, monkeypatch):
+    """A competing send command (scheduled or manual) must not be able to
+    enter delivery for a DIFFERENT edition while one send is already in
+    flight — mark_edition_sending's own state check is read-then-write with
+    no transaction around the pair, so two concurrent sends could otherwise
+    both read a sendable state before either writes 'sending'. The lock
+    must be held across the external _send() call itself, not just the
+    state transition either side of it."""
+    edition = svc.generate_edition(trigger="manual", delivery_policy="review")
+    entered_send = []
+
+    def blocking_send(edition_dict):
+        entered_send.append(True)
+        # A concurrent send attempted here proves the lock is held for the
+        # ENTIRE send, including the external call — not released early.
+        with pytest.raises(workflow.WorkflowLockHeldError):
+            svc.send_edition(edition["id"])
+        return {"part1": "sent", "part2": "sent"}
+
+    monkeypatch.setattr(svc, "_send", blocking_send)
+    result = svc.send_edition(edition["id"])
+
+    assert entered_send == [True]
+    assert result["state"] == "sent"
+
+
+def test_failed_send_transitions_to_send_failed_and_releases_the_lock(svc, monkeypatch):
+    """A failed delivery must land in send_failed (not stay 'sending'
+    forever), and the workflow lock must be released afterward so a
+    subsequent command isn't permanently blocked by one bad send."""
+    edition = svc.generate_edition(trigger="manual", delivery_policy="review")
+    monkeypatch.setattr(
+        svc, "_send", lambda e: {"part1": "error: smtp down", "part2": "error: smtp down"}
+    )
+
+    result = svc.send_edition(edition["id"])
+    assert result["state"] == "send_failed"
+
+    # Lock released: a wholly unrelated mutating command must succeed right
+    # after, proving _lock()'s finally-block ran and cleared ownership.
+    monkeypatch.setattr(svc, "_send", lambda e: {"part1": "sent", "part2": "sent"})
+    second = svc.generate_edition(trigger="manual", delivery_policy="review")
+    assert second["state"] == "needs_review"
+
+
+def test_retry_send_can_run_after_a_prior_send_failure(svc, monkeypatch):
+    """retry_send() must be able to acquire the lock and succeed once the
+    prior failed send has released it — the failure path must not leave
+    the edition or the lock in a state that blocks a legitimate retry."""
+    edition = svc.generate_edition(trigger="manual", delivery_policy="review")
+    monkeypatch.setattr(
+        svc, "_send", lambda e: {"part1": "error: smtp down", "part2": "error: smtp down"}
+    )
+    failed = svc.send_edition(edition["id"])
+    assert failed["state"] == "send_failed"
+
+    monkeypatch.setattr(svc, "_send", lambda e: {"part1": "sent", "part2": "sent"})
+    retried = svc.retry_send(edition["id"])
+    assert retried["state"] == "sent"
+
+
 # ---- Invariant 2: unique active Edition --------------------------------------
 
 
