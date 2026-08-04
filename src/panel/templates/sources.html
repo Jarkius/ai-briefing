@@ -17,10 +17,12 @@
 
 <div class="table-scroll">
 <table class="sources-table">
-  <thead><tr><th>type</th><th>name</th><th>identifier</th></tr></thead>
+  <thead><tr><th>type</th><th>name</th><th>identifier</th><th>status</th><th></th></tr></thead>
   <tbody>
     {% for s in subs %}
-    <tr><td>{{ s.source_type }}</td><td>{{ s.name }}</td><td class="mono">{{ s.identifier }}</td></tr>
+    <tr id="src-row-{{ s.name | replace(' ', '-') | replace('/', '-') | lower }}">
+      {% include "_source_row.html" %}
+    </tr>
     {% endfor %}
   </tbody>
 </table>

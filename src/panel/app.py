@@ -25,7 +25,7 @@ from starlette.requests import Request
 # src/ on the path so `from briefing import ...` works however uvicorn is cwd'd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from briefing import config, db, generator, mcp_client, researcher, sender  # noqa: E402
+from briefing import collector, config, db, generator, mcp_client, researcher, sender  # noqa: E402
 
 from . import jobs, state  # noqa: E402
 
@@ -302,7 +302,30 @@ def _job_fragment(job_id: str) -> str:
             '"Requested Research" section.</div>'
             f'<pre class="findings">{findings}</pre>'
         )
+    if job.name == "disable-source" and isinstance(job.result, str):
+        name = job.result
+        return f'<div class="banner banner-ok">✓ \'{html_lib.escape(name)}\' disabled and archived</div>' + _source_row_oob(name)
     return f'<div class="banner banner-ok">✓ {html_lib.escape(job.name)} done</div>'
+
+
+def _source_dom_id(name: str) -> str:
+    """Must match sources.html's `id="src-row-..."` filter chain exactly."""
+    return name.replace(" ", "-").replace("/", "-").lower()
+
+
+def _source_row_oob(name: str) -> str:
+    """Out-of-band fragment patching one Sources-table row in place after a
+    toggle — renders the same _source_row.html partial sources.html's loop
+    uses, so the two can never drift."""
+    sub = next((s for s in config.load_subscriptions() if s.get("name") == name), None)
+    if sub is None:
+        return ""
+    row_html = templates.get_template("_source_row.html").render(
+        s=sub, warn_threshold=config.FAILURE_WARN_THRESHOLD,
+        disable_threshold=config.FAILURE_DISABLE_THRESHOLD,
+    )
+    dom_id = f"src-row-{_source_dom_id(name)}"
+    return f'<tr id="{dom_id}" class="just-updated" hx-swap-oob="true">{row_html}</tr>'
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -452,7 +475,9 @@ async def sources_page(request: Request):
     return templates.TemplateResponse(
         request, "sources.html",
         {"active": "sources", "subs": config.load_subscriptions(),
-         "types": sorted(config.KNOWN_SOURCE_TYPES)},
+         "types": sorted(config.KNOWN_SOURCE_TYPES),
+         "warn_threshold": config.FAILURE_WARN_THRESHOLD,
+         "disable_threshold": config.FAILURE_DISABLE_THRESHOLD},
     )
 
 
@@ -476,6 +501,52 @@ async def sources_add(
     if err:
         return HTMLResponse(_banner("warn", f"saved, but git commit failed: {err}"))
     return HTMLResponse(_banner("ok", f"added '{name}' — subscribes on the next collect run"))
+
+
+async def _disable_source_job(name: str) -> str:
+    """Async job: archive + unsubscribe + disable one source. Acquires the
+    cross-process lock INSIDE the task (same reasoning as _research_job —
+    a sync context manager entered in the route would release at route
+    return, before the awaited MCP call actually runs)."""
+    conn = db.connect()
+    try:
+        with mcp_client.mcp_lock(retry_seconds=0):
+            async with mcp_client.McpSession() as session:
+                await collector._disable_source(session, conn, name)
+    finally:
+        conn.close()
+    return name
+
+
+@app.post("/sources/toggle", response_class=HTMLResponse)
+async def sources_toggle(name: str = Form(...), enable: str = Form(...)):
+    name = name.strip()
+    if enable == "true":
+        # No MCP call needed — re-subscribing happens naturally on the next
+        # collect run's _reconcile(), which skips already-subscribed names.
+        subs = config.load_subscriptions()
+        sub = next((s for s in subs if s.get("name") == name), None)
+        if sub is None:
+            return HTMLResponse(_banner("err", f"'{name}' not found"))
+        sub["enabled"] = True
+        sub["consecutive_failures"] = 0
+        config.save_subscriptions(subs)
+        err = _pathspec_commit(f"dashboard: enable source '{name}'", config.SUBSCRIPTIONS_PATH)
+        if err:
+            return HTMLResponse(_banner("warn", f"enabled, but git commit failed: {err}"))
+        return HTMLResponse(_banner("ok", f"'{name}' enabled — subscribes on the next collect run"))
+
+    # Disabling talks to the MCP server (unsubscribe) — same job/lock
+    # pattern as research, not a plain synchronous route.
+    if mcp_client.is_locked():
+        return HTMLResponse(
+            '<div class="banner banner-warn">Collection is running (lock held) — try again in a minute.</div>'
+        )
+    existing = jobs.running_job("disable-source")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_async("disable-source", lambda phase: _disable_source_job(name))
+    return HTMLResponse(_job_fragment(job_id))
 
 
 # ---- schedule ------------------------------------------------------------------
