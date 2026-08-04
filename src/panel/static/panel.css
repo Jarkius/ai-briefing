@@ -133,6 +133,12 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 .dot-busy::before, .dot-lock::before { animation: pulse 1.4s ease-in-out infinite; }
 .dot-lock { color: var(--err); }
 @keyframes pulse { 50% { opacity: 0.35; } }
+.dot-warn {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.02em;
+  color: var(--err); text-decoration: none; margin-left: var(--sp-1);
+}
+.dot-warn:hover { text-decoration: underline; }
+#gmail-reauth-btn { margin-left: var(--sp-3); }
 
 main {
   flex: 1;

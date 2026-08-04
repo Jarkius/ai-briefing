@@ -223,3 +223,84 @@ def test_settings_claude_cli_model_is_dropdown():
     assert '<select name="CLAUDE_CLI_MODEL">' in r.text
     for m in ("sonnet", "opus", "haiku"):
         assert f'value="{m}"' in r.text
+
+
+# ---- Gmail OAuth re-authorize (settings) -------------------------------------
+
+
+def test_settings_shows_expiring_soon_banner_with_button():
+    from unittest.mock import patch
+
+    with patch("panel.app.gmail_api.token_status",
+               return_value={"state": "expiring_soon", "age_days": 5.5, "days_left": 1.5}):
+        r = client.get("/settings")
+    assert "expires in 1.5 day" in r.text
+    assert "gmail-reauth-btn" in r.text
+    assert 'hx-post="/settings/gmail-reauth"' in r.text
+
+
+def test_settings_shows_expired_banner():
+    from unittest.mock import patch
+
+    with patch("panel.app.gmail_api.token_status",
+               return_value={"state": "expired", "age_days": 9.0, "days_left": -2.0}):
+        r = client.get("/settings")
+    assert "expired" in r.text.lower()
+    assert "gmail-reauth-btn" in r.text
+
+
+def test_settings_no_oauth_banner_when_healthy():
+    from unittest.mock import patch
+
+    with patch("panel.app.gmail_api.token_status",
+               return_value={"state": "ok", "age_days": 1.0, "days_left": 6.0}):
+        r = client.get("/settings")
+    assert "gmail-reauth-btn" not in r.text
+
+
+def test_settings_shows_not_configured_banner():
+    from unittest.mock import patch
+
+    with patch("panel.app.gmail_api.token_status",
+               return_value={"state": "not_configured", "age_days": None, "days_left": None}):
+        r = client.get("/settings")
+    assert "isn&#39;t set up" in r.text or "isn't set up" in r.text
+
+
+def test_gmail_reauth_route_enqueues_job():
+    from unittest.mock import patch
+
+    from panel import jobs
+
+    jobs.JOBS.clear()
+    with patch("panel.app._oauth_reauth_job", return_value="reauthorized"):
+        r = client.post("/settings/gmail-reauth")
+    assert 'hx-get="/jobs/' in r.text or "gmail-reauth" in r.text
+    jobs.JOBS.clear()
+
+
+def test_gmail_reauth_double_submit_reattaches():
+    from panel import jobs
+
+    jobs.JOBS.clear()
+    jobs.JOBS["reauth-busy"] = jobs.Job(name="gmail-reauth")
+    try:
+        r = client.post("/settings/gmail-reauth")
+        assert "reauth-busy" in r.text
+        assert len(jobs.JOBS) == 1
+    finally:
+        jobs.JOBS.clear()
+
+
+def test_gmail_reauth_job_fragment_success_message():
+    from panel import jobs
+    from panel.app import _job_fragment
+
+    jobs.JOBS.clear()
+    j = jobs.Job(name="gmail-reauth", status="done")
+    j.result = "reauthorized"
+    jobs.JOBS["done1"] = j
+    frag = _job_fragment("done1")
+    assert "re-authorized" in frag
+    assert "every 2s" not in frag  # terminal, polling stops
+    jobs.JOBS.clear()

@@ -4,6 +4,20 @@
 <div class="banner banner-warn">These values live in .env (gitignored, never committed). This page is served on
 localhost only — do not port-forward or expose port 8787.</div>
 
+{% if oauth.state == "not_configured" %}
+<div class="banner banner-err">Gmail send isn't set up yet — run <code>scripts/setup_gmail_oauth.py</code> once (needs the Cloud Console client secret first).</div>
+{% elif oauth.state == "expired" %}
+<div class="banner banner-err" id="oauth-banner">
+  Gmail token expired {{ (-oauth.days_left) | round(1) }} day(s) ago — the office network's port block means SMTP fallback may not work either.
+  <button type="button" id="gmail-reauth-btn" hx-post="/settings/gmail-reauth" hx-target="#oauth-banner" hx-swap="outerHTML">Re-authorize now</button>
+</div>
+{% elif oauth.state == "expiring_soon" %}
+<div class="banner banner-warn" id="oauth-banner">
+  Gmail token expires in {{ oauth.days_left }} day(s) (Testing-mode 7-day limit) — re-authorize before the next scheduled send.
+  <button type="button" id="gmail-reauth-btn" hx-post="/settings/gmail-reauth" hx-target="#oauth-banner" hx-swap="outerHTML">Re-authorize now</button>
+</div>
+{% endif %}
+
 <form hx-post="/settings" hx-target="#banner" hx-swap="innerHTML" class="settings-form" id="settings-form">
 
   <div class="card">
