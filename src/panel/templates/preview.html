@@ -8,25 +8,57 @@
             hx-confirm="Send both parts to the configured recipients now?">Send</button>
   </div>
 </div>
-<div id="banner"></div>
+<div id="banner" role="status" aria-live="polite"></div>
 
 {% if pending.requests or pending.findings_chars or pending.drafts %}
 <div class="pending-strip">
   <span class="pending-title">On the desk:</span>
   {% if pending.requests %}
-  <a href="/research" class="pending-chip" title="{{ pending.requests | join(' · ') }}">
+  <a href="/research" class="chip" title="{{ pending.requests | join(' · ') }}">
     {{ pending.requests | length }} research request{{ 's' if pending.requests | length != 1 }} unprocessed</a>
   {% endif %}
   {% if pending.findings_chars %}
-  <span class="pending-chip is-ready" title="folds into the next Regenerate">
+  <span class="chip is-ready" title="folds into the next Regenerate">
     research findings ready ({{ pending.findings_chars }} chars)</span>
   {% endif %}
   {% if pending.drafts %}
-  <a href="/archive" class="pending-chip" title="generated but never emailed">
+  <a href="/archive" class="chip" title="generated but never emailed">
     {{ pending.drafts }} draft{{ 's' if pending.drafts != 1 }} in the archive</a>
   {% endif %}
 </div>
 {% endif %}
+
+<div class="card social-post-cart">
+  <h2>Social Post Focus</h2>
+  <p class="muted">Optional — leave empty to build from the whole day's content (top items per section).
+  The automatic daily send always uses the whole day.</p>
+  <form hx-post="/preview/social-post" hx-target="#social-post-banner" hx-swap="innerHTML">
+    <div class="section-chips">
+      {% for i, label in social_post_sections %}
+      <label class="section-chip">
+        <input type="checkbox" name="sections" value="{{ i }}">
+        {{ label }}
+      </label>
+      {% endfor %}
+    </div>
+    <button type="submit" class="btn-send">Build social post</button>
+  </form>
+  <div id="social-post-banner" role="status" aria-live="polite"></div>
+
+  {% if social_post %}
+  <div class="letter">
+    <div class="page-head">
+      <h2>Share-Ready Post — {{ social_post.date_str }}</h2>
+      <div class="actions">
+        <button type="button" class="btn-send" hx-post="/preview/social-post/send"
+                hx-target="#social-post-banner" hx-swap="innerHTML"
+                hx-confirm="Email this social post to the configured recipients now?">Send</button>
+      </div>
+    </div>
+    <pre class="findings social-post-text">{{ social_post.post_text }}</pre>
+  </div>
+  {% endif %}
+</div>
 
 {% if gen %}
 <p class="muted">Generated {{ gen.date_str }} — exactly what sender would email (same in-memory HTML).</p>
@@ -40,13 +72,12 @@
 </section>
 {% else %}
 <div class="empty-state">
-  <span class="empty-drop">P</span>
+  <span class="empty-drop" aria-hidden="true">∅</span>
   <div class="empty-copy">
     <p class="empty-head">The presses are quiet.</p>
-    <p class="muted">Nothing has been typeset this session — this tab shows the exact
-    in-memory HTML that send uses. Hit <strong>Regenerate</strong> to set tonight's
-    edition from the current feed database, or leaf through past editions in the
-    <a href="/archive">Archive</a>.</p>
+    <p class="muted">This tab shows the exact in-memory HTML that send uses. Hit
+    <strong>Regenerate</strong> to set tonight's edition from the current feed database,
+    or browse past editions in the <a href="/archive">Archive</a>.</p>
   </div>
 </div>
 {% endif %}

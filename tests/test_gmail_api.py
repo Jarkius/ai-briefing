@@ -66,6 +66,37 @@ def test_get_credentials_refreshes_expired_token(tmp_path):
     assert token_path.read_text() == '{"refreshed": true}'
 
 
+def test_get_credentials_renames_token_and_raises_clear_error_on_invalid_grant(tmp_path):
+    """RefreshError (invalid_grant) means the refresh_token was revoked —
+    no retry recovers it, only a human re-running the browser consent
+    flow. The dead token must move aside (never delete — nothing is
+    deleted) so is_configured() reflects reality on the very next call."""
+    from google.auth.exceptions import RefreshError
+
+    token_path = tmp_path / "token.json"
+    token_path.write_text('{"refresh_token": "dead"}')
+
+    fake_creds = MagicMock(expired=True, refresh_token="dead")
+    fake_creds.refresh.side_effect = RefreshError(
+        "invalid_grant: Token has been expired or revoked."
+    )
+
+    with patch.object(gmail_api, "TOKEN_PATH", str(token_path)), \
+         patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=fake_creds):
+        try:
+            gmail_api._get_credentials()
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert "invalid_grant" in str(e) or "revoked" in str(e)
+            assert "setup_gmail_oauth.py" in str(e)
+
+    assert not token_path.exists()
+    assert (tmp_path / "token.json.expired").read_text() == '{"refresh_token": "dead"}'
+    # Reflects reality on the next call — no more silently-broken retries.
+    with patch.object(gmail_api, "TOKEN_PATH", str(token_path)):
+        assert gmail_api.is_configured() is False
+
+
 def test_service_builds_gmail_client_with_credentials():
     fake_creds = MagicMock()
     fake_service = MagicMock()

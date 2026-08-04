@@ -53,6 +53,11 @@ def rec(monkeypatch):
     monkeypatch.setattr(run.db, "insert_run", r.insert_run)
     monkeypatch.setattr(run.db, "update_run", r.update_run)
     monkeypatch.setattr(run.db, "record_send_status", r.record_send_status)
+    # Default Phase 5 to a deterministic no-op ("no fetchable sources") so
+    # tests that don't care about the social post don't depend on a
+    # MagicMock conn behaving like a real sqlite connection.
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", lambda conn: [])
+    monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", lambda items, max_items=None: [])
     return r
 
 
@@ -100,19 +105,54 @@ def test_main_happy_path_runs_all_phases_in_order(rec, monkeypatch):
         assert date_str == "Thursday, July 30, 2026"
         return send_result
 
+    def fake_candidates(conn):
+        call_order.append("social_post_candidates")
+        return [{"title": "x", "url": "https://example.com"}]
+
+    def fake_deep_fetch(items, max_items=None):
+        call_order.append("deep_fetch")
+        return [{"title": "x", "url": "https://example.com", "content": "body"}]
+
+    def fake_build_source(fetched):
+        call_order.append("build_source")
+        return "source material"
+
+    def fake_generate_social_post(source_material, date_str):
+        call_order.append("generate_social_post")
+        return "post text"
+
+    def fake_render_social_post_html(post_text, date_str):
+        call_order.append("render_social_post_html")
+        return "<p>post text</p>"
+
+    def fake_send_social_post_email(post_html, date_str):
+        call_order.append("send_social_post_email")
+        return "sent"
+
     monkeypatch.setattr(run.collector, "run", fake_collect)
     monkeypatch.setattr(run.researcher, "run_pending", fake_run_pending)
     monkeypatch.setattr(run.generator, "generate", fake_generate)
     monkeypatch.setattr(run.sender, "send_two_part_briefing", fake_send)
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", fake_candidates)
+    monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", fake_deep_fetch)
+    monkeypatch.setattr(run.generator, "build_social_post_source", fake_build_source)
+    monkeypatch.setattr(run.generator, "generate_social_post", fake_generate_social_post)
+    monkeypatch.setattr(run.sender, "render_social_post_html", fake_render_social_post_html)
+    monkeypatch.setattr(run.sender, "send_social_post_email", fake_send_social_post_email)
 
     run.main()
 
-    assert call_order == ["collect", "research", "generate", "send"]
+    assert call_order == [
+        "collect", "research", "generate", "send",
+        "social_post_candidates", "deep_fetch", "build_source",
+        "generate_social_post", "render_social_post_html", "send_social_post_email",
+    ]
     rec.conn.close.assert_called_once()
     assert rec.status_for("collect_status") == "ok"
     assert rec.status_for("research_status") == "ok (3 processed)"
     assert rec.status_for("generate_status") == "ok"
     assert rec.status_for("send_status") == str(send_result)
+    assert rec.status_for("social_post_status") == "sent"
     assert rec.status_for("finished_at") is not None
     rec.record_send_status.assert_called_once_with(generate_result["archive_file"], send_result)
 
@@ -316,3 +356,100 @@ def test_main_skips_record_send_status_when_no_archive_file(rec, monkeypatch):
     run.main()
 
     rec.record_send_status.assert_not_called()
+
+
+# ---- Phase 5: social post -----------------------------------------------------
+
+
+def _happy_path_through_send(monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+    monkeypatch.setattr(run.generator, "generate", lambda conn, research_findings="": _generate_result())
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", lambda p1, p2, d: {"part1": "sent", "part2": "sent"})
+
+
+def test_main_social_post_skipped_when_no_fetchable_sources(rec, monkeypatch):
+    _happy_path_through_send(monkeypatch)
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", lambda conn: [{"title": "x", "url": ""}])
+    monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", lambda items, max_items=None: [])
+    send_social_post_mock = MagicMock()
+    monkeypatch.setattr(run.sender, "send_social_post_email", send_social_post_mock)
+
+    run.main()
+
+    assert rec.status_for("social_post_status") == "skipped (no fetchable sources)"
+    send_social_post_mock.assert_not_called()
+
+
+def test_main_social_post_skipped_when_generate_phase_failed(rec, monkeypatch):
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(run.researcher, "run_pending", lambda: ("", 0))
+
+    def fake_generate(conn, research_findings=""):
+        raise RuntimeError("gemini down")
+
+    monkeypatch.setattr(run.generator, "generate", fake_generate)
+    candidates_mock = MagicMock()
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", candidates_mock)
+
+    run.main()
+
+    # result stayed None (generate failed), so Phase 5's `if result:` guard
+    # never opens — matches Phase 4's send-skip behavior on the same failure
+    assert rec.status_for("social_post_status") == "skipped"
+    candidates_mock.assert_not_called()
+
+
+def test_main_social_post_sent_end_to_end(rec, monkeypatch):
+    _happy_path_through_send(monkeypatch)
+    fetched = [{"title": "Article", "url": "https://example.com/a", "content": "body"}]
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", lambda conn: [{"title": "Article", "url": "https://example.com/a"}])
+    monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", lambda items, max_items=None: fetched)
+    monkeypatch.setattr(run.generator, "build_social_post_source", lambda f: "source material")
+    monkeypatch.setattr(run.generator, "generate_social_post", lambda source, date_str: "generated post")
+    monkeypatch.setattr(run.sender, "render_social_post_html", lambda text, date_str: "<p>generated post</p>")
+    send_social_post_mock = MagicMock(return_value="sent")
+    monkeypatch.setattr(run.sender, "send_social_post_email", send_social_post_mock)
+
+    run.main()
+
+    assert rec.status_for("social_post_status") == "sent"
+    send_social_post_mock.assert_called_once_with("<p>generated post</p>", "Thursday, July 30, 2026")
+
+
+def test_main_social_post_failure_is_caught_soft_and_does_not_affect_send_status(rec, monkeypatch):
+    _happy_path_through_send(monkeypatch)
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", lambda conn: [{"title": "x", "url": "https://example.com"}])
+
+    def fake_deep_fetch(items, max_items=None):
+        raise RuntimeError("mcp session boom")
+
+    monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", fake_deep_fetch)
+
+    run.main()
+
+    assert rec.status_for("social_post_status") == "error: mcp session boom"
+    # the main send phase's own status is untouched by the later failure
+    assert rec.status_for("send_status") == "{'part1': 'sent', 'part2': 'sent'}"
+    rec.conn.close.assert_called_once()
+
+
+def test_main_social_post_dry_run_prints_preview_and_does_not_send(rec, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run.py", "--dry-run"])
+    _happy_path_through_send(monkeypatch)
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", lambda conn: [{"title": "x", "url": "https://example.com"}])
+    monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", lambda items, max_items=None: [
+        {"title": "x", "url": "https://example.com", "content": "body"}
+    ])
+    monkeypatch.setattr(run.generator, "build_social_post_source", lambda f: "source material")
+    monkeypatch.setattr(run.generator, "generate_social_post", lambda source, date_str: "PREVIEW POST TEXT")
+    send_social_post_mock = MagicMock()
+    monkeypatch.setattr(run.sender, "send_social_post_email", send_social_post_mock)
+
+    run.main()
+
+    out = capsys.readouterr().out
+    assert "SOCIAL POST" in out
+    assert "PREVIEW POST TEXT" in out
+    assert rec.status_for("social_post_status") == "dry_run"
+    send_social_post_mock.assert_not_called()

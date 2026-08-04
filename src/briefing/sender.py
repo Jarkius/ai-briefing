@@ -470,6 +470,72 @@ def already_sent_today(subject_contains: str) -> bool:
     return _with_retry(_check, max_attempts=3, label="IMAP check")
 
 
+def render_social_post_html(post_text: str, date_str: str) -> str:
+    """Wrap the generated social post text in a simple HTML shell. The post
+    is plain conversational text with its own emoji/line-break formatting
+    (see generator.SOCIAL_POST_FORMAT_RULES) — not the '## '/'**' markdown
+    structure markdown_to_html parses, so it's rendered as escaped,
+    line-break-preserved text rather than run through that parser."""
+    escaped = html_lib.escape(post_text, quote=True).replace("\n", "<br>\n")
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style>
+body {{margin:0;padding:0;background:#F2F2F2;font-family:"Aptos",Calibri,sans-serif;}}
+</style>
+</head>
+<body bgcolor="#F2F2F2">
+<table border=0 cellspacing=0 cellpadding=0 width=600 align=center style="background:#F2F2F2;border-collapse:collapse;">
+  <tr>
+    <td style="padding:0 5px 5px 5px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="background:#0f172a;border-collapse:collapse;">
+        <tr>
+          <td style="padding:22px 28px 24px 28px;">
+            <p style="margin:0;font-size:18pt;font-weight:bold;color:white;">📢 Share-Ready Social Post</p>
+            <p style="margin:6pt 0 0 0;font-size:9pt;color:#94a3b8;">{date_str} &#8226; copy-paste ready for LinkedIn</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0 5px 5px 5px;">
+      <table border=0 cellspacing=0 cellpadding=0 width=590 style="background:white;border-collapse:collapse;">
+        <tr><td style="border-top:3px solid #86BC25;padding:0;"></td></tr>
+        <tr><td style="padding:20px 28px;">
+          <p style="margin:0;font-size:11pt;color:#1a1a1a;line-height:1.7;">{escaped}</p>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>"""
+
+
+def send_social_post_email(post_html: str, date_str: str) -> str:
+    """Send the share-ready social post email. Same mailbox-dedup and
+    send_lock posture as send_two_part_briefing's per-part loop, applied to
+    this single email. Returns 'sent' | 'already_sent' | 'error: ...'."""
+    from . import db
+
+    # One " — " separator before the date only, same shape as the part1/part2
+    # subjects — the marker before it must stay distinct from "AI Briefing
+    # Part 1"/"Part 2" so already_sent_today's substring match can't conflate
+    # this send with either of those.
+    subject = f"📢 AI Briefing Social Post — {date_str}"
+    marker = subject.split(" — ")[0]
+    with db.send_lock():
+        try:
+            if already_sent_today(marker):
+                return "already_sent"
+            send_email(subject, post_html)
+            return "sent"
+        except Exception as e:
+            return f"error: {e}"
+
+
 def send_two_part_briefing(part1_html: str, part2_html: str, date_str: str) -> dict:
     """Send both parts, skipping whichever already exists in the mailbox
     today. Returns a status dict per part: 'sent' | 'already_sent' | 'error'."""

@@ -24,6 +24,7 @@ FAKE_GEN = {
 
 def teardown_function():
     state.LAST_GENERATION = None
+    state.LAST_SOCIAL_POST = None
     jobs.JOBS.clear()
 
 
@@ -157,3 +158,170 @@ def test_send_double_submit_reattaches():
     finally:
         jobs.JOBS.clear()
         state.LAST_GENERATION = None
+
+
+# ---- social post cart ---------------------------------------------------------
+
+
+def test_preview_shows_section_checkboxes():
+    r = client.get("/preview")
+    assert "Social Post Focus" in r.text
+    assert 'name="sections" value="0"' in r.text
+    assert 'name="sections" value="5"' in r.text
+
+
+def test_preview_no_social_post_pane_before_any_build():
+    r = client.get("/preview")
+    assert "Share-Ready Post" not in r.text
+
+
+FAKE_SOCIAL_POST = {"post_text": "🚀 GENERATED POST BODY\n🔹 point one", "date_str": "Thursday, July 30, 2026"}
+
+
+def test_preview_shows_social_post_after_build():
+    state.set_social_post(FAKE_SOCIAL_POST)
+    r = client.get("/preview")
+    assert "Share-Ready Post" in r.text
+    assert "GENERATED POST BODY" in r.text
+    assert FAKE_SOCIAL_POST["date_str"] in r.text
+
+
+def test_social_post_build_enqueues_job():
+    with patch("panel.app._social_post_job", return_value=FAKE_SOCIAL_POST) as mock_job:
+        r = client.post("/preview/social-post", data={"sections": ["0", "2"]})
+    assert 'hx-get="/jobs/' in r.text
+    mock_job.assert_called_once_with([0, 2])
+    jobs.JOBS.clear()
+
+
+def test_social_post_build_with_no_sections_selected():
+    with patch("panel.app._social_post_job", return_value=FAKE_SOCIAL_POST) as mock_job:
+        client.post("/preview/social-post", data={})
+    mock_job.assert_called_once_with([])
+    jobs.JOBS.clear()
+
+
+def test_social_post_build_double_submit_reattaches():
+    jobs.JOBS.clear()
+    jobs.JOBS["spbusy"] = jobs.Job(name="social-post")
+    r = client.post("/preview/social-post", data={})
+    assert "spbusy" in r.text
+    assert len(jobs.JOBS) == 1
+    jobs.JOBS.clear()
+
+
+def test_social_post_job_fragment_success_message():
+    jobs.JOBS["spdone"] = jobs.Job(name="social-post", status="done", result=FAKE_SOCIAL_POST)
+    r = client.get("/jobs/spdone")
+    assert "social post ready" in r.text
+    jobs.JOBS.clear()
+
+
+def test_social_post_job_fragment_error_message():
+    jobs.JOBS["sperr"] = jobs.Job(
+        name="social-post", status="error",
+        phase_text="error: no fetchable sources in this selection (no URLs, or all fetches failed) — try a different section",
+    )
+    r = client.get("/jobs/sperr")
+    assert "social-post failed" in r.text
+    assert "no fetchable sources" in r.text
+    jobs.JOBS.clear()
+
+
+def test_social_post_send_without_generation_returns_error_banner_no_job():
+    r = client.post("/preview/social-post/send")
+    assert "build a social post first" in r.text
+    assert not jobs.JOBS
+
+
+def test_social_post_send_enqueues_job():
+    state.set_social_post(FAKE_SOCIAL_POST)
+    with patch("panel.app._social_post_send_job", return_value="sent"):
+        r = client.post("/preview/social-post/send")
+    assert 'hx-get="/jobs/' in r.text
+    jobs.JOBS.clear()
+
+
+def test_social_post_send_double_submit_reattaches():
+    state.set_social_post(FAKE_SOCIAL_POST)
+    jobs.JOBS["spsendbusy"] = jobs.Job(name="social-post-send")
+    r = client.post("/preview/social-post/send")
+    assert "spsendbusy" in r.text
+    assert len(jobs.JOBS) == 1
+    jobs.JOBS.clear()
+
+
+def test_social_post_send_job_fragment_sent():
+    jobs.JOBS["spsent"] = jobs.Job(name="social-post-send", status="done", result="sent")
+    r = client.get("/jobs/spsent")
+    assert "social post sent" in r.text
+    assert "banner-ok" in r.text
+    jobs.JOBS.clear()
+
+
+def test_social_post_send_job_fragment_already_sent():
+    jobs.JOBS["spalready"] = jobs.Job(name="social-post-send", status="done", result="already_sent")
+    r = client.get("/jobs/spalready")
+    assert "already sent today" in r.text
+    assert "banner-warn" in r.text
+    jobs.JOBS.clear()
+
+
+def test_social_post_send_job_fragment_error():
+    jobs.JOBS["spfail"] = jobs.Job(name="social-post-send", status="done", result="error: smtp down")
+    r = client.get("/jobs/spfail")
+    assert "social post send failed" in r.text
+    assert "banner-err" in r.text
+    jobs.JOBS.clear()
+
+
+def test_social_post_job_raises_when_no_fetchable_sources(tmp_path):
+    import sqlite3
+
+    from briefing import db as bdb
+    from panel.app import _social_post_job
+
+    db_path = str(tmp_path / "feeds.db")
+
+    def fake_connect():
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        bdb._ensure_runs_table(conn)
+        return conn
+
+    with patch("panel.app.db.connect", side_effect=fake_connect), \
+         patch("panel.app.generator.social_post_candidate_items", return_value=[{"title": "x", "url": ""}]), \
+         patch("panel.app.researcher.deep_fetch_items_sync", return_value=[]):
+        try:
+            _social_post_job([])
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert "no fetchable sources" in str(e)
+
+
+def test_social_post_job_passes_section_indices_through(tmp_path):
+    import sqlite3
+
+    from briefing import db as bdb
+    from panel.app import _social_post_job
+
+    db_path = str(tmp_path / "feeds.db")
+
+    def fake_connect():
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        bdb._ensure_runs_table(conn)
+        return conn
+
+    with patch("panel.app.db.connect", side_effect=fake_connect), \
+         patch("panel.app.generator.social_post_candidate_items", return_value=[{"title": "x", "url": "https://example.com"}]) as mock_candidates, \
+         patch("panel.app.researcher.deep_fetch_items_sync", return_value=[{"title": "x", "url": "https://example.com", "content": "body"}]), \
+         patch("panel.app.generator.build_social_post_source", return_value="material"), \
+         patch("panel.app.generator.generate_social_post", return_value="generated post"):
+        result = _social_post_job([1, 3])
+
+    mock_candidates.assert_called_once()
+    _, kwargs = mock_candidates.call_args
+    assert kwargs["section_indices"] == [1, 3]
+    assert result["post_text"] == "generated post"
+    assert state.get_social_post() == result

@@ -1,0 +1,30 @@
+{# Single Sources-table row. Included from sources.html's loop, and
+   rendered standalone (with an id + hx-swap-oob wrapper) from app.py's
+   _source_row_oob after a toggle completes — keep both callers in sync
+   with this file, not a duplicated string in app.py. #}
+<td>{{ s.source_type }}</td>
+<td>{{ s.name }}</td>
+<td class="mono">{{ s.identifier }}</td>
+<td>
+  {% set failures = s.get('consecutive_failures', 0) %}
+  {% if not s.get('enabled', True) %}
+    <span class="badge-unsent" title="disabled — skipped on collect runs">disabled</span>
+  {% elif failures >= warn_threshold %}
+    <span class="badge-flaky" title="{{ failures }} consecutive failures — auto-disables at {{ disable_threshold }}">⚠ {{ failures }} failing</span>
+  {% elif failures > 0 %}
+    <span class="muted mono" style="font-size:0.78rem">{{ failures }} recent failure{{ 's' if failures != 1 }}</span>
+  {% endif %}
+</td>
+<td>
+  <form hx-post="/sources/toggle" hx-target="#banner" hx-swap="innerHTML">
+    <input type="hidden" name="name" value="{{ s.name }}">
+    {% if s.get('enabled', True) %}
+      <input type="hidden" name="enable" value="false">
+      <button type="submit" class="btn-danger"
+              hx-confirm="Disable '{{ s.name }}'? Its stored articles will be archived to archives/sources/ then removed from the feed database.">Disable</button>
+    {% else %}
+      <input type="hidden" name="enable" value="true">
+      <button type="submit">Enable</button>
+    {% endif %}
+  </form>
+</td>

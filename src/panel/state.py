@@ -11,6 +11,11 @@ import threading
 
 LAST_GENERATION: dict | None = None  # generate()'s return dict, verbatim
 
+# {'post_text': str, 'date_str': str} from the last completed social-post
+# job — separate from LAST_GENERATION since it's built from deep-fetched
+# sources, not the daily digest's markdown, and has its own send button.
+LAST_SOCIAL_POST: dict | None = None
+
 # Findings text from the last completed dashboard research job. The next
 # dashboard Regenerate folds this into generate(research_findings=...) —
 # same as run.py's research→generate handoff — then clears it so a later
@@ -31,6 +36,16 @@ def set_generation(result: dict) -> None:
 
 def get_generation() -> dict | None:
     return LAST_GENERATION
+
+
+def set_social_post(result: dict) -> None:
+    global LAST_SOCIAL_POST
+    with _LOCK:
+        LAST_SOCIAL_POST = result
+
+
+def get_social_post() -> dict | None:
+    return LAST_SOCIAL_POST
 
 
 def add_research_findings(text: str) -> None:

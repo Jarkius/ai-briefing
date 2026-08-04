@@ -138,6 +138,35 @@ def test_archive_send_rejects_unknown_file(tmp_path):
     assert "unknown archive" in r.text
 
 
+def test_archive_send_job_result_patches_list_badge_oob(tmp_path):
+    """The send button lives in .archive-view; the badge it needs to update
+    lives in .archive-list — two different DOM regions the #banner-targeted
+    htmx swap can't reach on its own. Without the OOB fragment, a send from
+    the detail pane looks like nothing happened until a full page reload."""
+    from panel import app, jobs
+
+    (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)), \
+         patch("panel.app.db.load_send_status", return_value={
+             "briefing_2026-07-24_0500.md": {"status": "sent", "at": "2026-07-24T05:01:00"},
+         }):
+        jobs.JOBS.clear()
+        job_id = "test-job-id"
+        jobs.JOBS[job_id] = jobs.Job(
+            name="send", status="done",
+            result={"part1": "sent", "part2": "sent"},
+            target="briefing_2026-07-24_0500.md",
+        )
+        frag = app._job_fragment(job_id)
+    assert 'hx-swap-oob="true"' in frag
+    assert 'id="a-badges-briefing_2026-07-24_0500-md"' in frag
+    assert "just-updated" in frag
+    assert "badge-sent" in frag
+    assert 'id="a-send-btn-briefing_2026-07-24_0500-md"' in frag
+    assert "Send again" in frag
+    jobs.JOBS.clear()
+
+
 def test_archive_filter_chips(tmp_path):
     (tmp_path / "briefing_2026-07-24_0500.md").write_text(FULL_MD)   # draft
     (tmp_path / "briefing_2026-07-25_0600.md").write_text(FULL_MD)   # sent

@@ -156,6 +156,13 @@ KNOWN_SOURCE_TYPES = {
     "news", "reddit", "hackernews", "github", "arxiv", "youtube", "podcast", "twitter",
 }
 
+# Source health: consecutive same-source check_feeds failures (excluding
+# runs where every checked source failed — that's a network-wide outage,
+# not a per-source problem, see collector._update_failure_streaks) before
+# warning, then auto-disabling.
+FAILURE_WARN_THRESHOLD = 3
+FAILURE_DISABLE_THRESHOLD = 5
+
 
 def load_subscriptions() -> list[dict]:
     """Read subscriptions.json. Returns [] if the file doesn't exist yet."""

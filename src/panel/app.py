@@ -25,7 +25,7 @@ from starlette.requests import Request
 # src/ on the path so `from briefing import ...` works however uvicorn is cwd'd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from briefing import config, db, generator, mcp_client, researcher, sender  # noqa: E402
+from briefing import collector, config, db, generator, mcp_client, researcher, sender  # noqa: E402
 
 from . import jobs, state  # noqa: E402
 
@@ -57,7 +57,11 @@ async def preview(request: Request):
         "drafts": sum(1 for e in _list_archives() if not e["send_status"]),
     }
     return templates.TemplateResponse(
-        request, "preview.html", {"active": "preview", "gen": gen, "pending": pending}
+        request, "preview.html", {
+            "active": "preview", "gen": gen, "pending": pending,
+            "social_post": state.get_social_post(),
+            "social_post_sections": list(enumerate(SOCIAL_POST_SECTION_LABELS)),
+        }
     )
 
 
@@ -131,6 +135,113 @@ async def preview_send():
     return HTMLResponse(_job_fragment(job_id))
 
 
+# Short editor-facing labels for the section checkboxes — SECTION_PROMPTS'
+# own labels ("1/6: top stories + news") are dev-facing call-order markers.
+SOCIAL_POST_SECTION_LABELS = [
+    "Top Stories & News",
+    "Governance & Mindset",
+    "Learning & Best Practices",
+    "Security & Ethics",
+    "Research & Tools",
+    "Technical Deep-Dive",
+]
+
+
+def _social_post_job(section_indices: list[int]) -> dict:
+    """Blocking: deep-fetch source items for the given sections (empty list
+    = every section, capped per-section — see
+    generator.social_post_candidate_items), then generate one social post.
+    Raises if nothing was fetchable, so the job surfaces as a clear error
+    banner instead of silently producing a post from thin air."""
+    conn = db.connect()
+    try:
+        candidates = generator.social_post_candidate_items(
+            conn, section_indices=section_indices or None,
+        )
+    finally:
+        conn.close()
+    fetched = researcher.deep_fetch_items_sync(candidates)
+    if not fetched:
+        raise RuntimeError(
+            "no fetchable sources in this selection (no URLs, or all fetches failed) — "
+            "try a different section"
+        )
+    source_material = generator.build_social_post_source(fetched)
+    now = datetime.now()
+    # No %-d (glibc/BSD-only, raises on Windows) — same construction as
+    # generator.generate()'s date_str.
+    date_str = f"{now.strftime('%A, %B')} {now.day}, {now.year}"
+    post_text = generator.generate_social_post(source_material, date_str)
+    result = {"post_text": post_text, "date_str": date_str}
+    state.set_social_post(result)
+    return result
+
+
+def _social_post_send_job() -> str:
+    """Blocking: send the last generated social post."""
+    post = state.get_social_post()
+    if post is None:
+        raise RuntimeError("nothing generated yet — build a social post first")
+    post_html = sender.render_social_post_html(post["post_text"], post["date_str"])
+    return sender.send_social_post_email(post_html, post["date_str"])
+
+
+@app.post("/preview/social-post", response_class=HTMLResponse)
+async def preview_social_post(sections: list[int] = Form([])):
+    existing = jobs.running_job("social-post")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_sync("social-post", _social_post_job, sections)
+    return HTMLResponse(_job_fragment(job_id))
+
+
+@app.post("/preview/social-post/send", response_class=HTMLResponse)
+async def preview_social_post_send():
+    if state.get_social_post() is None:
+        return HTMLResponse('<div class="banner banner-err">Nothing generated yet — build a social post first.</div>')
+    existing = jobs.running_job("social-post-send")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_sync("social-post-send", _social_post_send_job)
+    return HTMLResponse(_job_fragment(job_id))
+
+
+def _archive_badge_oob(fname: str) -> str:
+    """Out-of-band fragment patching one archive-list row's badge in place.
+    Mirrors the badge markup in archive.html's #for e in entries# loop —
+    keep both in sync if that block changes. `just-updated` triggers the
+    badge-pop CSS animation (panel.css) so a send from the detail pane is
+    visible in the list without a full-page reload."""
+    entry = next((e for e in _list_archives() if e["file"] == fname), None)
+    if entry is None:
+        return ""
+    if entry["send_status"] == "sent":
+        badge = f'<span class="badge-sent" title="emailed {html_lib.escape(entry["sent_at"])}">✉ sent</span>'
+    elif entry["send_status"] == "error":
+        badge = f'<span class="badge-senderr" title="send failed {html_lib.escape(entry["sent_at"])}">✉ failed</span>'
+    elif entry["send_status"] == "partial":
+        badge = f'<span class="badge-senderr" title="partially sent {html_lib.escape(entry["sent_at"])}">✉ partial</span>'
+    else:
+        badge = (
+            '<span class="badge-unsent" title="generated but never emailed — '
+            'open it and click \'Send this edition\'">draft</span>'
+        )
+    if entry["research"]:
+        titles = html_lib.escape(", ".join(entry["research"]))
+        badge += f'<span class="badge-research" title="research: {titles}">🔍</span>'
+    dom_id = f'a-badges-{fname.replace(".", "-")}'
+    badge_oob = f'<span id="{dom_id}" class="a-badges just-updated" hx-swap-oob="true">{badge}</span>'
+    # The detail-pane button's label ("Send this edition" -> "Send again")
+    # is stale after a send too — only relevant while that file is open.
+    btn_id = f'a-send-btn-{fname.replace(".", "-")}'
+    btn_label = "Send again" if entry["send_status"] == "sent" else "Send this edition"
+    btn_oob = (
+        f'<button type="submit" class="btn-send" id="{btn_id}" hx-swap-oob="true">'
+        f'{btn_label}</button>'
+    )
+    return badge_oob + btn_oob
+
+
 def _job_fragment(job_id: str) -> str:
     """Polling fragment: keeps hx-trigger while running; terminal renders
     drop the attribute, which is how htmx polling stops."""
@@ -158,12 +269,31 @@ def _job_fragment(job_id: str) -> str:
         already = all(v == "already_sent" for v in job.result.values())
         css = "banner-warn" if already else "banner-ok"
         note = "already sent today — nothing re-sent" if already else "sent"
-        return f'<div class="banner {css}">✓ {note} ({html_lib.escape(parts)})</div>'
+        banner = f'<div class="banner {css}">✓ {note} ({html_lib.escape(parts)})</div>'
+        # Archive-detail sends (job.target set) patch the list badge in
+        # place via OOB swap — otherwise the banner (targeted at #banner,
+        # inside .archive-view) is the only visible confirmation, and the
+        # list row still says "draft" until a full page reload.
+        if job.target:
+            banner += _archive_badge_oob(job.target)
+        return banner
     if job.name == "regenerate":
         return (
             '<div class="banner banner-ok" hx-get="/preview" hx-trigger="load delay:1s" '
             'hx-target="body" hx-swap="innerHTML">✓ regenerated — refreshing preview…</div>'
         )
+    if job.name == "social-post":
+        return (
+            '<div class="banner banner-ok" hx-get="/preview" hx-trigger="load delay:1s" '
+            'hx-target="body" hx-swap="innerHTML">✓ social post ready — refreshing preview…</div>'
+        )
+    if job.name == "social-post-send" and isinstance(job.result, str):
+        result = job.result
+        if result.startswith("error"):
+            return f'<div class="banner banner-err">✗ social post send failed: {html_lib.escape(result)}</div>'
+        css = "banner-warn" if result == "already_sent" else "banner-ok"
+        note = "already sent today" if result == "already_sent" else "sent"
+        return f'<div class="banner {css}">✓ social post {note}</div>'
     if job.name == "research" and isinstance(job.result, str):
         findings = html_lib.escape(job.result)
         return (
@@ -172,7 +302,30 @@ def _job_fragment(job_id: str) -> str:
             '"Requested Research" section.</div>'
             f'<pre class="findings">{findings}</pre>'
         )
+    if job.name == "disable-source" and isinstance(job.result, str):
+        name = job.result
+        return f'<div class="banner banner-ok">✓ \'{html_lib.escape(name)}\' disabled and archived</div>' + _source_row_oob(name)
     return f'<div class="banner banner-ok">✓ {html_lib.escape(job.name)} done</div>'
+
+
+def _source_dom_id(name: str) -> str:
+    """Must match sources.html's `id="src-row-..."` filter chain exactly."""
+    return name.replace(" ", "-").replace("/", "-").lower()
+
+
+def _source_row_oob(name: str) -> str:
+    """Out-of-band fragment patching one Sources-table row in place after a
+    toggle — renders the same _source_row.html partial sources.html's loop
+    uses, so the two can never drift."""
+    sub = next((s for s in config.load_subscriptions() if s.get("name") == name), None)
+    if sub is None:
+        return ""
+    row_html = templates.get_template("_source_row.html").render(
+        s=sub, warn_threshold=config.FAILURE_WARN_THRESHOLD,
+        disable_threshold=config.FAILURE_DISABLE_THRESHOLD,
+    )
+    dom_id = f"src-row-{_source_dom_id(name)}"
+    return f'<tr id="{dom_id}" class="just-updated" hx-swap-oob="true">{row_html}</tr>'
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -322,7 +475,9 @@ async def sources_page(request: Request):
     return templates.TemplateResponse(
         request, "sources.html",
         {"active": "sources", "subs": config.load_subscriptions(),
-         "types": sorted(config.KNOWN_SOURCE_TYPES)},
+         "types": sorted(config.KNOWN_SOURCE_TYPES),
+         "warn_threshold": config.FAILURE_WARN_THRESHOLD,
+         "disable_threshold": config.FAILURE_DISABLE_THRESHOLD},
     )
 
 
@@ -346,6 +501,52 @@ async def sources_add(
     if err:
         return HTMLResponse(_banner("warn", f"saved, but git commit failed: {err}"))
     return HTMLResponse(_banner("ok", f"added '{name}' — subscribes on the next collect run"))
+
+
+async def _disable_source_job(name: str) -> str:
+    """Async job: archive + unsubscribe + disable one source. Acquires the
+    cross-process lock INSIDE the task (same reasoning as _research_job —
+    a sync context manager entered in the route would release at route
+    return, before the awaited MCP call actually runs)."""
+    conn = db.connect()
+    try:
+        with mcp_client.mcp_lock(retry_seconds=0):
+            async with mcp_client.McpSession() as session:
+                await collector._disable_source(session, conn, name)
+    finally:
+        conn.close()
+    return name
+
+
+@app.post("/sources/toggle", response_class=HTMLResponse)
+async def sources_toggle(name: str = Form(...), enable: str = Form(...)):
+    name = name.strip()
+    if enable == "true":
+        # No MCP call needed — re-subscribing happens naturally on the next
+        # collect run's _reconcile(), which skips already-subscribed names.
+        subs = config.load_subscriptions()
+        sub = next((s for s in subs if s.get("name") == name), None)
+        if sub is None:
+            return HTMLResponse(_banner("err", f"'{name}' not found"))
+        sub["enabled"] = True
+        sub["consecutive_failures"] = 0
+        config.save_subscriptions(subs)
+        err = _pathspec_commit(f"dashboard: enable source '{name}'", config.SUBSCRIPTIONS_PATH)
+        if err:
+            return HTMLResponse(_banner("warn", f"enabled, but git commit failed: {err}"))
+        return HTMLResponse(_banner("ok", f"'{name}' enabled — subscribes on the next collect run"))
+
+    # Disabling talks to the MCP server (unsubscribe) — same job/lock
+    # pattern as research, not a plain synchronous route.
+    if mcp_client.is_locked():
+        return HTMLResponse(
+            '<div class="banner banner-warn">Collection is running (lock held) — try again in a minute.</div>'
+        )
+    existing = jobs.running_job("disable-source")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_async("disable-source", lambda phase: _disable_source_job(name))
+    return HTMLResponse(_job_fragment(job_id))
 
 
 # ---- schedule ------------------------------------------------------------------
@@ -649,7 +850,9 @@ async def archive_send(view: str = Form(...)):
     existing = jobs.running_job("send")
     if existing:
         return HTMLResponse(_job_fragment(existing))
-    job_id = jobs.submit_sync("send", _archive_send_job, entry["file"], entry["date"])
+    job_id = jobs.submit_sync(
+        "send", _archive_send_job, entry["file"], entry["date"], target=entry["file"],
+    )
     return HTMLResponse(_job_fragment(job_id))
 
 
@@ -731,11 +934,12 @@ async def logs_tail():
         for s in _phase_strip()
     )
     return HTMLResponse(
-        f'<div id="logs-live" hx-get="/logs/tail" hx-trigger="every 3s" hx-swap="outerHTML">'
+        f'<div id="logs-live" hx-get="/logs/tail" hx-trigger="every 3s" hx-swap="outerHTML" '
+        f'role="status" aria-live="polite">'
         f'<div class="phase-strip">{strip}</div>'
         f'<h2 class="muted">Dashboard jobs (this session)</h2>'
-        f'<table class="sources-table"><thead><tr><th>started</th><th>job</th><th>status</th><th>phase</th></tr></thead>'
-        f'<tbody>{jobs_rows}</tbody></table>'
+        f'<div class="table-scroll"><table class="sources-table"><thead><tr><th>started</th><th>job</th><th>status</th><th>phase</th></tr></thead>'
+        f'<tbody>{jobs_rows}</tbody></table></div>'
         f'<h2 class="muted">briefing.log (cron) — last 200 lines</h2>'
         f'<pre class="logtail">{_highlight_log(tail) or "(no log file yet)"}</pre>'
         f'</div>'
@@ -757,6 +961,7 @@ async def status():
     else:
         state, label = "idle", "idle"
     return HTMLResponse(
-        f'<span id="status-dot" class="dot dot-{state}" title="{label}" '
-        f'hx-get="/status" hx-trigger="every 3s" hx-swap="outerHTML">● {label}</span>'
+        f'<span id="status-dot" class="dot dot-{state}" title="{label}" role="status" aria-live="polite" '
+        f'hx-get="/status" hx-trigger="every 3s" hx-swap="outerHTML">'
+        f'<span class="dot-label">{label}</span></span>'
     )

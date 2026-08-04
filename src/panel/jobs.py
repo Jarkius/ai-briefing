@@ -24,6 +24,10 @@ class Job:
     result: object = None
     error: str = ""
     started_at: str = field(default_factory=lambda: datetime.now().strftime("%H:%M:%S"))
+    # Job-specific identifier a fragment builder needs but that must not leak
+    # into `result` (e.g. archive-send's filename — result stays the plain
+    # part1/part2 status dict sender.send_two_part_briefing returns).
+    target: str = ""
 
 
 JOBS: dict[str, Job] = {}
@@ -57,11 +61,11 @@ def get(job_id: str) -> Job | None:
     return JOBS.get(job_id)
 
 
-def submit_sync(name: str, fn, *args, **kwargs) -> str:
+def submit_sync(name: str, fn, *args, target: str = "", **kwargs) -> str:
     """Run a BLOCKING function on a worker thread, tracked as a job.
     Returns the job id immediately."""
     job_id = uuid.uuid4().hex[:12]
-    job = Job(name=name)
+    job = Job(name=name, target=target)
     _evict_old_terminal_jobs()
     JOBS[job_id] = job
 

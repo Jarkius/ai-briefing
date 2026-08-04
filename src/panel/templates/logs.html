@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Logs</h1>
-<div id="logs-live" hx-get="/logs/tail" hx-trigger="load" hx-swap="outerHTML">
+<div id="logs-live" role="status" aria-live="polite" hx-get="/logs/tail" hx-trigger="load" hx-swap="outerHTML">
   <p class="muted">loading…</p>
 </div>
 {% endblock %}
