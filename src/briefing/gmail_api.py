@@ -70,6 +70,7 @@ def token_status() -> dict:
 
 
 def _get_credentials():
+    from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
@@ -81,7 +82,26 @@ def _get_credentials():
         )
     creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            # invalid_grant: the refresh_token itself was revoked (Google's
+            # silent 7-day expiry on testing-mode OAuth apps, seen in
+            # production — briefing.log 2026-08-02: "invalid_grant: Token
+            # has been expired or revoked"). Retrying this same call is
+            # pure waste — no amount of backoff makes a revoked grant valid
+            # again, only a human re-running the browser consent flow does.
+            # Rename (never delete — nothing is deleted) so is_configured()
+            # reflects reality and every subsequent call in this run and
+            # the next skips straight to SMTP/IMAP instead of retrying a
+            # doomed refresh, while the dead token stays on disk for
+            # inspection.
+            os.replace(TOKEN_PATH, TOKEN_PATH + ".expired")
+            raise RuntimeError(
+                "Gmail OAuth token revoked or expired (invalid_grant) — "
+                f"re-run scripts/setup_gmail_oauth.py (needs a one-time "
+                f"browser login). Old token moved to {TOKEN_PATH}.expired"
+            ) from e
         # Atomic replace, not truncate+write: a cron send and a dashboard
         # send can both hit refresh near expiry, and an interleaved write
         # would corrupt the token file — killing the PRIMARY transport on
