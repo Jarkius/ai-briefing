@@ -28,7 +28,7 @@
     <a href="/archive?view={{ e.file }}&show={{ show }}"
        class="{{ 'selected' if selected and e.file == selected.file else '' }}">
       <span class="a-time mono">{{ e.time }}</span>
-      <span class="a-badges">
+      <span class="a-badges" id="a-badges-{{ e.file | replace('.', '-') }}">
         {%- if e.send_status == 'sent' %}<span class="badge-sent" title="emailed {{ e.sent_at }}">✉ sent</span>
         {%- elif e.send_status == 'error' %}<span class="badge-senderr" title="send failed {{ e.sent_at }}">✉ failed</span>
         {%- elif e.send_status == 'partial' %}<span class="badge-senderr" title="partially sent {{ e.sent_at }}">✉ partial</span>
@@ -47,7 +47,7 @@
         <form hx-post="/archive/send" hx-target="#banner" hx-swap="innerHTML"
               hx-confirm="Email this edition ({{ selected.date }} {{ selected.time }}) to the configured recipients?{% if selected.send_status == 'sent' %} It was already sent {{ selected.sent_at }} — the dedup check will skip unless the mailbox says otherwise.{% endif %}">
           <input type="hidden" name="view" value="{{ selected.file }}">
-          <button type="submit" class="btn-send">{{ 'Send again' if selected.send_status == 'sent' else 'Send this edition' }}</button>
+          <button type="submit" class="btn-send" id="a-send-btn-{{ selected.file | replace('.', '-') }}">{{ 'Send again' if selected.send_status == 'sent' else 'Send this edition' }}</button>
         </form>
       </div>
     </div>

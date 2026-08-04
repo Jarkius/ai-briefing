@@ -206,6 +206,42 @@ async def preview_social_post_send():
     return HTMLResponse(_job_fragment(job_id))
 
 
+def _archive_badge_oob(fname: str) -> str:
+    """Out-of-band fragment patching one archive-list row's badge in place.
+    Mirrors the badge markup in archive.html's #for e in entries# loop —
+    keep both in sync if that block changes. `just-updated` triggers the
+    badge-pop CSS animation (panel.css) so a send from the detail pane is
+    visible in the list without a full-page reload."""
+    entry = next((e for e in _list_archives() if e["file"] == fname), None)
+    if entry is None:
+        return ""
+    if entry["send_status"] == "sent":
+        badge = f'<span class="badge-sent" title="emailed {html_lib.escape(entry["sent_at"])}">✉ sent</span>'
+    elif entry["send_status"] == "error":
+        badge = f'<span class="badge-senderr" title="send failed {html_lib.escape(entry["sent_at"])}">✉ failed</span>'
+    elif entry["send_status"] == "partial":
+        badge = f'<span class="badge-senderr" title="partially sent {html_lib.escape(entry["sent_at"])}">✉ partial</span>'
+    else:
+        badge = (
+            '<span class="badge-unsent" title="generated but never emailed — '
+            'open it and click \'Send this edition\'">draft</span>'
+        )
+    if entry["research"]:
+        titles = html_lib.escape(", ".join(entry["research"]))
+        badge += f'<span class="badge-research" title="research: {titles}">🔍</span>'
+    dom_id = f'a-badges-{fname.replace(".", "-")}'
+    badge_oob = f'<span id="{dom_id}" class="a-badges just-updated" hx-swap-oob="true">{badge}</span>'
+    # The detail-pane button's label ("Send this edition" -> "Send again")
+    # is stale after a send too — only relevant while that file is open.
+    btn_id = f'a-send-btn-{fname.replace(".", "-")}'
+    btn_label = "Send again" if entry["send_status"] == "sent" else "Send this edition"
+    btn_oob = (
+        f'<button type="submit" class="btn-send" id="{btn_id}" hx-swap-oob="true">'
+        f'{btn_label}</button>'
+    )
+    return badge_oob + btn_oob
+
+
 def _job_fragment(job_id: str) -> str:
     """Polling fragment: keeps hx-trigger while running; terminal renders
     drop the attribute, which is how htmx polling stops."""
@@ -233,7 +269,14 @@ def _job_fragment(job_id: str) -> str:
         already = all(v == "already_sent" for v in job.result.values())
         css = "banner-warn" if already else "banner-ok"
         note = "already sent today — nothing re-sent" if already else "sent"
-        return f'<div class="banner {css}">✓ {note} ({html_lib.escape(parts)})</div>'
+        banner = f'<div class="banner {css}">✓ {note} ({html_lib.escape(parts)})</div>'
+        # Archive-detail sends (job.target set) patch the list badge in
+        # place via OOB swap — otherwise the banner (targeted at #banner,
+        # inside .archive-view) is the only visible confirmation, and the
+        # list row still says "draft" until a full page reload.
+        if job.target:
+            banner += _archive_badge_oob(job.target)
+        return banner
     if job.name == "regenerate":
         return (
             '<div class="banner banner-ok" hx-get="/preview" hx-trigger="load delay:1s" '
@@ -736,7 +779,9 @@ async def archive_send(view: str = Form(...)):
     existing = jobs.running_job("send")
     if existing:
         return HTMLResponse(_job_fragment(existing))
-    job_id = jobs.submit_sync("send", _archive_send_job, entry["file"], entry["date"])
+    job_id = jobs.submit_sync(
+        "send", _archive_send_job, entry["file"], entry["date"], target=entry["file"],
+    )
     return HTMLResponse(_job_fragment(job_id))
 
 

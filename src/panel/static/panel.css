@@ -413,6 +413,17 @@ a.chip:hover { color: var(--text); border-color: var(--accent); }
 .badge-sent { color: var(--ok); border-color: rgba(76, 175, 125, 0.4); }
 .badge-senderr { color: var(--err); border-color: rgba(224, 104, 95, 0.4); }
 .badge-unsent { color: var(--text-muted); border-color: var(--border-strong); }
+/* status just changed (e.g. draft -> sent via htmx OOB swap) — a brief pop
+   so the update is visible even off in a scrolled list, not just a silent
+   DOM patch. */
+.a-badges.just-updated .badge-sent,
+.a-badges.just-updated .badge-senderr {
+  animation: badge-pop 0.5s ease-out;
+}
+@keyframes badge-pop { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .a-badges.just-updated .badge-sent, .a-badges.just-updated .badge-senderr { animation: none; }
+}
 .in-archives { color: var(--text-muted); font-size: 0.8rem; margin-left: var(--sp-1); }
 .in-archives a { color: var(--accent); text-decoration: none; }
 .in-archives a:hover { text-decoration: underline; }
