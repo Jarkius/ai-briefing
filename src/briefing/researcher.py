@@ -26,6 +26,15 @@ CHECKBOX_RE = re.compile(r"^- \[( |x)\] (.+)$")
 YOUTUBE_RE = re.compile(r"(youtube\.com/watch|youtu\.be/)")
 URL_RE = re.compile(r"https?://\S+")
 
+# A bare "topic" line gets fed verbatim to search_feeds/google_search as a
+# literal query — appropriate for a short phrase ("ai agent orchestrator,
+# best practice"), useless (and silently wasteful) for multi-paragraph
+# prose that has no line breaks (e.g. an AI-brainstormed research brief
+# pasted into one textarea line). See src/panel/app.py's research_run,
+# which rejects/redirects text over this length to /research/paste instead
+# of queueing it as a topic search.
+TOPIC_LENGTH_GUARD_CHARS = 300
+
 
 def _public_url_error(url: str) -> str | None:
     """SSRF guard for URLs we fetch server-side (visit_page/transcribe run a
@@ -130,11 +139,18 @@ async def research_one(session, request_text: str, phase_cb=None) -> str:
     return f"### {request_text}\n\n" + "\n\n".join(findings)
 
 
-async def run_pending_async(phase_cb=None) -> tuple[str, int]:
+async def run_pending_async(phase_cb=None, on_result=None) -> tuple[str, int]:
     """Research every unchecked request in research_requests.md. Returns
     (combined_findings, count_processed). Flips processed lines to [x] with
     today's date and writes the file (caller is responsible for the
-    pathspec-restricted git commit — see control-panel plan)."""
+    pathspec-restricted git commit — see control-panel plan).
+
+    `on_result(request_text, finding_text)`, if given, fires once per
+    request immediately after that request's finding is produced — the
+    panel uses this to persist each result durably (research_store.py) as
+    it completes, rather than only after the whole batch finishes. Optional
+    and unused by run.py's scheduled path, which stays on the plain
+    combined-string return."""
     if not __import__("os").path.exists(config.RESEARCH_REQUESTS_PATH):
         return "", 0
 
@@ -155,6 +171,8 @@ async def run_pending_async(phase_cb=None) -> tuple[str, int]:
             finding = await research_one(session, req["text"], phase_cb=phase_cb)
             findings_blocks.append(finding)
             processed_texts.append(req["text"])
+            if on_result is not None:
+                on_result(req["text"], finding)
 
     # Re-read and patch by CONTENT, not the start-of-run snapshot: research
     # takes minutes, and the panel may have appended new requests meanwhile —

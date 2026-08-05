@@ -92,7 +92,7 @@ def test_send_result_sent_renders_ok_banner():
     assert "banner-ok" in r.text
 
 
-def test_regenerate_job_writes_dashboard_runs_row(tmp_path):
+def test_regenerate_job_writes_dashboard_runs_row(tmp_path, research_db):
     # _regenerate_job must insert a source='dashboard' runs row with
     # generate_status ok, and stash the result for /preview.
     import sqlite3
@@ -123,20 +123,22 @@ def test_regenerate_job_writes_dashboard_runs_row(tmp_path):
     assert row["generate_status"] == "ok"
 
 
-def test_preview_shows_pending_strip(tmp_path):
+def test_preview_shows_pending_strip(tmp_path, research_db):
+    from briefing import research_store
+
     reqfile = tmp_path / "research_requests.md"
     reqfile.write_text("- [ ] pending topic one\n- [x] done already\n")
-    state.LAST_RESEARCH_FINDINGS = "### something\n\nfindings here"
-    try:
-        with patch("panel.app.config.RESEARCH_REQUESTS_PATH", str(reqfile)), \
-             patch("panel.app._list_archives", return_value=[
-                 {"send_status": ""}, {"send_status": "sent"}, {"send_status": ""}]):
-            r = client.get("/preview")
-        assert "1 research request unprocessed" in r.text
-        assert "research findings ready" in r.text
-        assert "2 drafts in the archive" in r.text
-    finally:
-        state.LAST_RESEARCH_FINDINGS = ""
+    conn = research_store.connect_at(research_db)
+    task_id = research_store.insert_queued(conn, "something")
+    research_store.mark_ready(conn, task_id, "findings here")
+
+    with patch("panel.app.config.RESEARCH_REQUESTS_PATH", str(reqfile)), \
+         patch("panel.app._list_archives", return_value=[
+             {"send_status": ""}, {"send_status": "sent"}, {"send_status": ""}]):
+        r = client.get("/preview")
+    assert "1 research request unprocessed" in r.text
+    assert "research findings ready" in r.text
+    assert "2 drafts in the archive" in r.text
 
 
 def test_regenerate_double_submit_reattaches_not_duplicates():
