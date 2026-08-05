@@ -1,5 +1,7 @@
 """Archive browser tests: listing, selection, date fidelity, path safety."""
 
+import os
+import re
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -204,3 +206,19 @@ def test_invalid_calendar_date_archive_skipped_not_500(tmp_path):
     assert r.status_code == 200
     assert "briefing_2026-13-45_9999.md" not in r.text  # skipped from list
     assert "briefing_2026-07-24_0500.md" in r.text      # valid one renders
+
+
+def test_date_headers_are_not_sticky():
+    """Regression: every date-group header used position:sticky top:0,
+    so scrolling past group N made group N+1's header overlap/replace it —
+    the reported 'date time pane got overlapped' bug. Assert against the
+    stylesheet since this is a rendering property, not markup."""
+    css_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "src", "panel", "static", "panel.css",
+    )
+    with open(css_path) as f:
+        css = f.read()
+    datehead_rule = re.search(r"\.a-datehead\s*\{[^}]*\}", css)
+    assert datehead_rule, "no .a-datehead rule found"
+    assert "sticky" not in datehead_rule.group(0)

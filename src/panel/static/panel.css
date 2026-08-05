@@ -133,6 +133,12 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 .dot-busy::before, .dot-lock::before { animation: pulse 1.4s ease-in-out infinite; }
 .dot-lock { color: var(--err); }
 @keyframes pulse { 50% { opacity: 0.35; } }
+.dot-warn {
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.02em;
+  color: var(--err); text-decoration: none; margin-left: var(--sp-1);
+}
+.dot-warn:hover { text-decoration: underline; }
+#gmail-reauth-btn { margin-left: var(--sp-3); }
 
 main {
   flex: 1;
@@ -378,16 +384,23 @@ a.chip:hover { color: var(--text); border-color: var(--accent); }
   background: var(--surface);
   align-self: flex-start;
 }
+/* NOT sticky: every date-head previously carried `position: sticky; top:
+   0`, so scrolling past group N made group N+1's header snap to the same
+   position and visually overlap/replace it — unreadable with 9+ date
+   groups in a real archive. A plain in-flow divider scrolls normally;
+   still visually distinct via the top accent border. */
 .a-datehead {
+  display: block;
   font-family: var(--mono);
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   color: var(--accent);
   padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  border-top: 2px solid var(--accent);
   border-bottom: 1px solid var(--border);
   background: var(--surface-raised);
-  position: sticky; top: 0;
 }
+.a-datehead:first-child { border-top: none; }
 .archive-list a {
   display: flex;
   align-items: center;

@@ -30,19 +30,47 @@
 
 <div id="banner" role="status" aria-live="polite">{% if live_fragment %}{{ live_fragment | safe }}{% endif %}</div>
 
-<h2 style="margin-top:2rem">Requests (newest first)</h2>
+<h2 style="margin-top:2rem">Pending (not yet researched)</h2>
 <ul class="requests">
-  {% for r in requests %}
-  <li class="{{ 'done' if r.checked else 'pending' }}">
-    <span class="tick">{{ '☑' if r.checked else '☐' }}</span> {{ r.text }}
-    {% if r.archives %}
-    <span class="in-archives">→ in
-      {% for a in r.archives %}<a href="/archive?view={{ a.file }}">{{ a.date }} {{ a.time }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
-    </span>
+  {% for r in pending %}
+  <li>
+    <span class="tick">☐</span> {{ r.text }}
+  </li>
+  {% else %}
+  <li class="empty-inline">Nothing queued — paste a link or a topic above and the desk gets to work.</li>
+  {% endfor %}
+</ul>
+
+<div class="page-head" style="margin-top:2rem">
+  <h2 style="margin:0">Completed research (newest first)</h2>
+</div>
+<form method="get" action="/research" class="add-source" style="margin-bottom:1rem">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search past research by topic or findings text…">
+  <button type="submit">Search</button>
+  {% if q %}<a href="/research" class="chip">clear</a>{% endif %}
+</form>
+<ul class="requests">
+  {% for t in tasks %}
+  <li>
+    <a href="/research/{{ t.id }}" class="mono muted" title="open research task #{{ t.id }}">#{{ t.id }}</a>
+    {% if t.state == 'ready' %}
+      <span class="badge-flaky" title="findings exist but no edition has included them yet">⏳ ready — not yet included</span>
+    {% elif t.state == 'consumed' %}
+      {% if t.archive_entry %}
+        <span class="badge-sent" title="included in this edition">✓ included</span>
+      {% else %}
+        <span class="badge-unsent" title="marked included, but that archive no longer exists on disk">✓ included (archive missing)</span>
+      {% endif %}
+    {% elif t.state == 'failed' %}
+      <span class="badge-senderr" title="{{ t.error_text }}">✗ failed</span>
+    {% endif %}
+    — <a href="/research/{{ t.id }}">{{ t.input_text[:160] }}{{ '…' if t.input_text | length > 160 }}</a>
+    {% if t.archive_entry %}
+    <span class="in-archives">→ in <a href="/archive?view={{ t.archive_entry.file }}">{{ t.archive_entry.date }} {{ t.archive_entry.time }}</a></span>
     {% endif %}
   </li>
   {% else %}
-  <li class="empty-inline">No assignments filed yet — paste a link or a topic above and the desk gets to work.</li>
+  <li class="empty-inline">{{ "No research matches “%s”." % q if q else "No research completed yet." }}</li>
   {% endfor %}
 </ul>
 {% endblock %}

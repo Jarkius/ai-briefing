@@ -25,7 +25,7 @@ from starlette.requests import Request
 # src/ on the path so `from briefing import ...` works however uvicorn is cwd'd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from briefing import collector, config, db, generator, mcp_client, researcher, sender  # noqa: E402
+from briefing import collector, config, db, generator, gmail_api, mcp_client, research_store, researcher, sender  # noqa: E402
 
 from . import jobs, state  # noqa: E402
 
@@ -51,9 +51,14 @@ async def preview(request: Request):
             pending_requests = [
                 r["text"] for r in researcher.parse_requests(f.read()) if not r["checked"]
             ]
+    research_conn = research_store.connect()
+    try:
+        ready = research_store.list_ready(research_conn)
+    finally:
+        research_conn.close()
     pending = {
         "requests": pending_requests,
-        "findings_chars": len(state.LAST_RESEARCH_FINDINGS),
+        "findings_chars": sum(len(t.get("result_text") or "") for t in ready),
         "drafts": sum(1 for e in _list_archives() if not e["send_status"]),
     }
     return templates.TemplateResponse(
@@ -68,20 +73,39 @@ async def preview(request: Request):
 def _regenerate_job() -> dict:
     """Blocking: run generate() against current DB state, tracked in a
     dashboard-source runs row. Runs on a worker thread via submit_sync.
-    Folds in any findings from a completed dashboard research job (the
-    panel's equivalent of run.py's research→generate handoff)."""
-    findings = state.pop_research_findings()
-    conn = db.connect()
+    Folds in any research_store-'ready' findings (the panel's equivalent
+    of run.py's research→generate handoff).
+
+    Consumption is recorded ONLY after generate() succeeds and produces an
+    archive file — if this process dies between generate() returning and
+    mark_consumed running, the tasks stay 'ready' (visible, re-includable
+    on the next Regenerate) rather than silently vanishing or being
+    falsely marked included in an edition they never reached. A duplicate
+    inclusion on a retried Regenerate is an acceptable cost; silent loss
+    is not."""
+    research_conn = research_store.connect()
     try:
-        run_id = db.insert_run(conn, source="dashboard", started_at=datetime.now().isoformat())
+        ready = research_store.list_ready(research_conn)
+        findings = "\n\n".join(t["result_text"] for t in ready if t.get("result_text"))
+
+        conn = db.connect()
         try:
-            result = generator.generate(conn, research_findings=findings)
-            db.update_run(conn, run_id, generate_status="ok")
-        except Exception as e:
-            db.update_run(conn, run_id, generate_status="error", error_text=str(e)[:500])
-            raise
+            run_id = db.insert_run(conn, source="dashboard", started_at=datetime.now().isoformat())
+            try:
+                result = generator.generate(conn, research_findings=findings)
+                db.update_run(conn, run_id, generate_status="ok")
+            except Exception as e:
+                db.update_run(conn, run_id, generate_status="error", error_text=str(e)[:500])
+                raise
+        finally:
+            conn.close()
+
+        if ready and result.get("archive_file"):
+            research_store.mark_consumed(
+                research_conn, [t["id"] for t in ready], result["archive_file"]
+            )
     finally:
-        conn.close()
+        research_conn.close()
     state.set_generation(result)
     return result
 
@@ -112,8 +136,8 @@ def _send_job() -> dict:
 
 @app.post("/preview/regenerate", response_class=HTMLResponse)
 async def preview_regenerate():
-    # Double-click guard: two concurrent regenerates race on
-    # pop_research_findings and last-writer-wins the preview state —
+    # Double-click guard: two concurrent regenerates race on consuming the
+    # same 'ready' research tasks and last-writer-wins the preview state —
     # reattach to the running job instead of spawning a second.
     existing = jobs.running_job("regenerate")
     if existing:
@@ -305,6 +329,12 @@ def _job_fragment(job_id: str) -> str:
     if job.name == "disable-source" and isinstance(job.result, str):
         name = job.result
         return f'<div class="banner banner-ok">✓ \'{html_lib.escape(name)}\' disabled and archived</div>' + _source_row_oob(name)
+    if job.name == "gmail-reauth":
+        return (
+            '<div class="banner banner-ok" hx-get="/settings" hx-trigger="load delay:1s" '
+            'hx-target="body" hx-swap="innerHTML">✓ re-authorized — Gmail send is good for '
+            'another 7 days.</div>'
+        )
     return f'<div class="banner banner-ok">✓ {html_lib.escape(job.name)} done</div>'
 
 
@@ -355,15 +385,29 @@ def _pathspec_commit(message: str, path: str) -> str | None:
 async def _research_job(phase) -> str:
     """Async job: acquire the cross-process lock INSIDE the task (review m5 —
     a sync context manager entered in the route would release at route
-    return), then run all pending requests with live phase text."""
-    with mcp_client.mcp_lock(retry_seconds=0):
-        findings, count = await researcher.run_pending_async(phase_cb=phase)
+    return), then run all pending requests with live phase text.
+
+    Each result is persisted to research_store durably AS IT COMPLETES
+    (on_result) — this is now the sole source _regenerate_job reads from
+    (see below), replacing state.py's LAST_RESEARCH_FINDINGS for this
+    handoff. Previously, the research_requests.md checkbox flipped to done
+    the moment this function returned, regardless of whether the findings
+    survived a restart or ever reached a generated edition — an in-process
+    global with no durability. A user's pasted research was found checked
+    off with zero trace in any archive: permanently lost with no
+    indication anything had gone wrong. The checkbox now means "the
+    research function returned"; research_store's 'ready'/'consumed'
+    states are what actually track durability and inclusion."""
+    conn = research_store.connect()
+    try:
+        def on_result(request_text, finding_text):
+            research_store.mark_ready(conn, research_store.insert_queued(conn, request_text), finding_text)
+
+        with mcp_client.mcp_lock(retry_seconds=0):
+            findings, count = await researcher.run_pending_async(phase_cb=phase, on_result=on_result)
+    finally:
+        conn.close()
     if count:
-        # Stash for the next dashboard Regenerate → "Requested Research"
-        # section in the newsletter, mirroring run.py's phase handoff.
-        # Append, never set — the user may have pasted material while this
-        # job ran; a clobber here silently discarded it (hunt-panel HIGH#3).
-        state.add_research_findings(findings)
         err = _pathspec_commit(
             "dashboard: research request completed", config.RESEARCH_REQUESTS_PATH
         )
@@ -373,22 +417,37 @@ async def _research_job(phase) -> str:
 
 
 @app.get("/research", response_class=HTMLResponse)
-async def research(request: Request):
-    reqs = []
+async def research(request: Request, q: str = ""):
+    # Still-unprocessed requests come from the checkbox file — a
+    # research_store row only exists once research_one() has actually
+    # returned a result (see _research_job's on_result).
+    pending = []
     if os.path.exists(config.RESEARCH_REQUESTS_PATH):
         with open(config.RESEARCH_REQUESTS_PATH, encoding="utf-8") as f:
-            reqs = researcher.parse_requests(f.read())
-    reqs.reverse()  # newest first
-    # Map each completed request to the archive(s) whose research receipt
-    # names it — answers "where did my research end up?" with a link.
-    request_archives: dict[str, list[dict]] = {}
-    for entry in _list_archives():
-        for label in entry["research"]:
-            request_archives.setdefault(label, []).append(entry)
-    for r in reqs:
-        # request text minus the "(researched YYYY-MM-DD)" suffix the flip adds
-        bare = _re.sub(r"\s*\(researched \d{4}-\d{2}-\d{2}\)$", "", r["text"])
-        r["archives"] = request_archives.get(bare, [])
+            pending = [r for r in researcher.parse_requests(f.read()) if not r["checked"]]
+    pending.reverse()  # newest first
+
+    # Completed research — sourced from research_store (durable, has a
+    # real id + state + archive_file), not from string-matching the
+    # checked line's text against a "### {label}" receipt heading baked
+    # into the archive's tail. That matching was fragile by construction
+    # (any whitespace/wording drift silently breaks the link) and simply
+    # didn't exist for /research/paste entries, which never wrote a
+    # receipt at all — this is also where pasted material becomes visible
+    # in this list for the first time.
+    q = q.strip()
+    research_conn = research_store.connect()
+    try:
+        tasks = research_store.search_tasks(research_conn, q) if q else research_store.list_tasks(research_conn)
+    finally:
+        research_conn.close()
+    for t in tasks:
+        t["archive_entry"] = None
+        if t.get("archive_file"):
+            t["archive_entry"] = next(
+                (e for e in _list_archives() if e["file"] == t["archive_file"]), None
+            )
+
     # AC7 — a reload reattaches to any live job by re-rendering its polling
     # fragment (in-memory registry is the only place the job exists).
     live = next(
@@ -398,8 +457,31 @@ async def research(request: Request):
     )
     return templates.TemplateResponse(
         request, "research.html",
-        {"active": "research", "requests": reqs,
+        {"active": "research", "pending": pending, "tasks": tasks, "q": q,
          "live_fragment": _job_fragment(live) if live else None},
+    )
+
+
+@app.get("/research/{task_id}", response_class=HTMLResponse)
+async def research_detail(request: Request, task_id: int):
+    research_conn = research_store.connect()
+    try:
+        task = research_store.get_task(research_conn, task_id)
+    finally:
+        research_conn.close()
+    if task is None:
+        return HTMLResponse(
+            f'<div class="banner banner-warn">No research task #{task_id}.</div>',
+            status_code=404,
+        )
+    archive_entry = None
+    if task.get("archive_file"):
+        archive_entry = next(
+            (e for e in _list_archives() if e["file"] == task["archive_file"]), None
+        )
+    return templates.TemplateResponse(
+        request, "research_detail.html",
+        {"active": "research", "task": task, "archive_entry": archive_entry},
     )
 
 
@@ -413,10 +495,32 @@ async def research_run(text: str = Form("")):
             '<div class="banner banner-warn">Collection is running (lock held) — try again in a minute.</div>'
         )
     if text:
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        # A long non-URL/non-YouTube line has no line breaks of its own —
+        # it's prose (an AI-brainstormed brief, notes, an article excerpt),
+        # not a topic phrase. Queued as a "topic" it gets fed verbatim to
+        # search_feeds/google_search as one literal query, which returns
+        # garbage, and the checkbox still flips to done — silently losing
+        # real material with no indication anything went wrong. Reject and
+        # redirect to /research/paste instead, which files it as findings
+        # directly with no lossy search round-trip.
+        oversized = [
+            ln for ln in lines
+            if len(ln) > researcher.TOPIC_LENGTH_GUARD_CHARS
+            and not researcher.YOUTUBE_RE.search(ln)
+            and not researcher.URL_RE.search(ln)
+        ]
+        if oversized:
+            return HTMLResponse(_banner(
+                "warn",
+                f"{len(oversized)} line(s) look like pasted material, not a topic/URL "
+                f"(over {researcher.TOPIC_LENGTH_GUARD_CHARS} chars, no link) — "
+                "use “Already have the material? Paste it directly” below instead. "
+                "Nothing was queued.",
+            ))
         # Append pasted requests as unchecked lines; the job picks them up.
-        lines = [f"- [ ] {ln.strip()}" for ln in text.splitlines() if ln.strip()]
         with open(config.RESEARCH_REQUESTS_PATH, "a", encoding="utf-8") as f:
-            f.write("\n" + "\n".join(lines) + "\n")
+            f.write("\n" + "\n".join(f"- [ ] {ln}" for ln in lines) + "\n")
     job_id = jobs.submit_async("research", _research_job)
     return HTMLResponse(_job_fragment(job_id))
 
@@ -435,7 +539,12 @@ async def research_paste(title: str = Form(""), content: str = Form(...)):
         f"### {title} (provided by the editor — rewrite into newsletter style, "
         f"do not quote verbatim)\n\n{content}"
     )
-    state.add_research_findings(block)
+    conn = research_store.connect()
+    try:
+        task_id = research_store.insert_queued(conn, title)
+        research_store.mark_ready(conn, task_id, block)
+    finally:
+        conn.close()
     return HTMLResponse(_banner(
         "ok",
         f"'{title}' filed ({len(content)} chars) — it will be rewritten into the next "
@@ -664,8 +773,25 @@ async def settings_page(request: Request):
     return templates.TemplateResponse(
         request, "settings.html",
         {"active": "settings", "values": values, "providers": providers,
-         "cli_models": CLAUDE_CLI_MODELS},
+         "cli_models": CLAUDE_CLI_MODELS, "oauth": gmail_api.token_status()},
     )
+
+
+def _oauth_reauth_job() -> str:
+    """Blocking: opens a local browser for the human consent click. Runs on
+    a worker thread like every other job — the click itself can't be
+    automated, but starting/tracking it from the panel means no terminal."""
+    gmail_api.run_oauth_consent()
+    return "reauthorized"
+
+
+@app.post("/settings/gmail-reauth", response_class=HTMLResponse)
+async def settings_gmail_reauth():
+    existing = jobs.running_job("gmail-reauth")
+    if existing:
+        return HTMLResponse(_job_fragment(existing))
+    job_id = jobs.submit_sync("gmail-reauth", _oauth_reauth_job)
+    return HTMLResponse(_job_fragment(job_id))
 
 
 @app.post("/settings", response_class=HTMLResponse)
@@ -953,6 +1079,10 @@ async def status():
     green = idle · amber = a dashboard job is running · red = data/.mcp.lock
     is held (a cron collect/research or another process is mid-run).
     is_locked() is a quick flock probe, cheap enough to poll.
+
+    Gmail token expiry check rides this same poll (site-wide, every page —
+    Settings isn't where you're looking when 5am is what matters) rather
+    than adding a second poller; os.path.getmtime is equally cheap.
     """
     if mcp_client.is_locked():
         state, label = "lock", "cron/collect running"
@@ -960,8 +1090,17 @@ async def status():
         state, label = "busy", "job running"
     else:
         state, label = "idle", "idle"
+
+    oauth = gmail_api.token_status()
+    oauth_html = ""
+    if oauth["state"] == "expired":
+        oauth_html = ' <a href="/settings" class="dot-warn" title="Gmail token expired — send may be broken">✉⚠</a>'
+    elif oauth["state"] == "expiring_soon":
+        oauth_html = f' <a href="/settings" class="dot-warn" title="Gmail token expires in {oauth["days_left"]}d">✉{oauth["days_left"]:g}d</a>'
+
     return HTMLResponse(
         f'<span id="status-dot" class="dot dot-{state}" title="{label}" role="status" aria-live="polite" '
         f'hx-get="/status" hx-trigger="every 3s" hx-swap="outerHTML">'
         f'<span class="dot-label">{label}</span></span>'
+        f'{oauth_html}'
     )

@@ -2,116 +2,139 @@
   {
     "source_type": "hackernews",
     "identifier": "top",
-    "name": "Hacker News (top)"
+    "name": "Hacker News (top)",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "techcrunch",
-    "name": "TechCrunch"
+    "name": "TechCrunch",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "ars",
-    "name": "Ars Technica"
+    "name": "Ars Technica",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://blog.google/technology/ai/rss/",
-    "name": "Google AI Blog"
+    "name": "Google AI Blog",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://huggingface.co/blog/feed.xml",
-    "name": "Hugging Face Blog"
+    "name": "Hugging Face Blog",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://pytorch.org/blog/feed.xml",
-    "name": "PyTorch Blog"
+    "name": "PyTorch Blog",
+    "consecutive_failures": 0
   },
   {
     "source_type": "arxiv",
     "identifier": "ai",
-    "name": "arXiv cs.AI"
+    "name": "arXiv cs.AI",
+    "consecutive_failures": 0
   },
   {
     "source_type": "arxiv",
     "identifier": "ml",
-    "name": "arXiv cs.LG"
+    "name": "arXiv cs.LG",
+    "consecutive_failures": 0
   },
   {
     "source_type": "youtube",
     "identifier": "@AndrejKarpathy",
-    "name": "Andrej Karpathy"
+    "name": "Andrej Karpathy",
+    "consecutive_failures": 0
   },
   {
     "source_type": "youtube",
     "identifier": "@YannicKilcher",
-    "name": "Yannic Kilcher"
+    "name": "Yannic Kilcher",
+    "consecutive_failures": 0
   },
   {
     "source_type": "youtube",
     "identifier": "@aiexplained-official",
-    "name": "AI Explained"
+    "name": "AI Explained",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://openai.com/news/rss.xml",
-    "name": "OpenAI News"
+    "name": "OpenAI News",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://deepmind.google/blog/rss.xml",
-    "name": "DeepMind Blog"
+    "name": "DeepMind Blog",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://developer.nvidia.com/blog/feed/",
-    "name": "NVIDIA Developer Blog"
+    "name": "NVIDIA Developer Blog",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://www.langchain.com/blog/rss.xml",
-    "name": "LangChain Blog"
+    "name": "LangChain Blog",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://www.latent.space/feed",
-    "name": "Latent Space"
+    "name": "Latent Space",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://magazine.sebastianraschka.com/feed",
-    "name": "Ahead of AI"
+    "name": "Ahead of AI",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://importai.substack.com/feed",
-    "name": "Import AI"
+    "name": "Import AI",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://tldr.tech/api/rss/ai",
-    "name": "TLDR AI"
+    "name": "TLDR AI",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://venturebeat.com/category/ai/feed/",
-    "name": "VentureBeat AI"
+    "name": "VentureBeat AI",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://www.reddit.com/r/LocalLLaMA/hot.rss?limit=15",
-    "name": "Reddit r/LocalLLaMA"
+    "name": "Reddit r/LocalLLaMA",
+    "consecutive_failures": 0
   },
   {
     "source_type": "news",
     "identifier": "https://www.reddit.com/r/MachineLearning/hot.rss?limit=10",
-    "name": "Reddit r/MachineLearning"
+    "name": "Reddit r/MachineLearning",
+    "consecutive_failures": 3
   },
   {
     "source_type": "arxiv",
     "identifier": "nlp",
-    "name": "arXiv cs.CL"
+    "name": "arXiv cs.CL",
+    "consecutive_failures": 0
   }
 ]

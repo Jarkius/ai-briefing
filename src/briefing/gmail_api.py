@@ -32,6 +32,43 @@ def is_configured() -> bool:
     return os.path.exists(TOKEN_PATH)
 
 
+# While the OAuth consent screen stays in Google's "Testing" publishing
+# status, the refresh token dies after 7 days regardless of use — the
+# failure is silent (invalid_grant on the next send, discovered at 5am).
+# There's no API to extend it; re-consenting in a browser resets the clock.
+# We can't automate the click, but we CAN warn before it happens.
+TESTING_MODE_TOKEN_LIFETIME_DAYS = 7
+WARN_WITHIN_DAYS = 2
+
+
+def token_age_days() -> float | None:
+    """Days since the token file was last (re)written — a fresh consent or
+    a refresh both update mtime. None if not configured."""
+    if not os.path.exists(TOKEN_PATH):
+        return None
+    import time
+
+    return (time.time() - os.path.getmtime(TOKEN_PATH)) / 86400
+
+
+def token_status() -> dict:
+    """Panel-facing summary: not_configured | ok | expiring_soon | expired.
+    'expiring_soon'/'expired' assume Testing-mode's 7-day refresh-token
+    limit — harmless over-warning once the app is published, since a
+    published token has no such deadline and refreshes silently on use."""
+    age = token_age_days()
+    if age is None:
+        return {"state": "not_configured", "age_days": None, "days_left": None}
+    days_left = TESTING_MODE_TOKEN_LIFETIME_DAYS - age
+    if days_left <= 0:
+        state = "expired"
+    elif days_left <= WARN_WITHIN_DAYS:
+        state = "expiring_soon"
+    else:
+        state = "ok"
+    return {"state": state, "age_days": round(age, 1), "days_left": round(days_left, 1)}
+
+
 def _get_credentials():
     from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
@@ -85,6 +122,33 @@ def _service():
     from googleapiclient.discovery import build
 
     return build("gmail", "v1", credentials=_get_credentials())
+
+
+def run_oauth_consent(timeout: int = 180) -> None:
+    """Opens a local browser for the human consent click and saves the
+    resulting token — the interactive step nothing can automate away.
+    Shared by scripts/setup_gmail_oauth.py and the panel's Settings 'Re-
+    authorize' button; requires CLIENT_SECRET_PATH to already exist (that
+    part IS a one-time manual Cloud Console step, done once per project)."""
+    if not os.path.exists(CLIENT_SECRET_PATH):
+        raise RuntimeError(
+            f"missing {CLIENT_SECRET_PATH} — the Cloud Console OAuth client "
+            "setup (scripts/setup_gmail_oauth.py's steps 1-3) hasn't been done"
+        )
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_PATH, SCOPES)
+    try:
+        creds = flow.run_local_server(port=0, timeout_seconds=timeout)
+    except Exception:
+        creds = flow.run_console()
+
+    tmp_path = TOKEN_PATH + ".tmp"
+    os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+    config.restrict_to_owner_only(tmp_path)
+    os.replace(tmp_path, TOKEN_PATH)
 
 
 def send_email_via_api(subject: str, html: str) -> None:

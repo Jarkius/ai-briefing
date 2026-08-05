@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Research #{{ task.id }}</h1>
+  <div class="actions">
+    <a href="/research" class="btn">← Back to Research</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Request</h2>
+  <p>{{ task.input_text }}</p>
+  <p class="muted mono" style="font-size:0.78rem">
+    filed {{ task.created_at }}
+    {% if task.finished_at %} · finished {{ task.finished_at }}{% endif %}
+  </p>
+</div>
+
+<div class="card">
+  <h2>Status</h2>
+  {% if task.state == 'ready' %}
+    <span class="badge-flaky" title="findings exist but no edition has included them yet">⏳ ready — not yet included</span>
+  {% elif task.state == 'consumed' %}
+    {% if archive_entry %}
+      <span class="badge-sent">✓ included</span>
+      <span class="in-archives">→ in <a href="/archive?view={{ archive_entry.file }}">{{ archive_entry.date }} {{ archive_entry.time }}</a></span>
+      <p class="muted mono" style="font-size:0.78rem">consumed {{ task.consumed_at }}</p>
+    {% else %}
+      <span class="badge-unsent">✓ included (archive missing — {{ task.archive_file }} no longer on disk)</span>
+    {% endif %}
+  {% elif task.state == 'failed' %}
+    <span class="badge-senderr">✗ failed</span>
+    <p class="muted">{{ task.error_text }}</p>
+  {% else %}
+    <span class="muted">queued — not yet researched</span>
+  {% endif %}
+</div>
+
+{% if task.result_text %}
+<div class="card">
+  <h2>Findings</h2>
+  <pre class="findings">{{ task.result_text }}</pre>
+</div>
+{% endif %}
+{% endblock %}
