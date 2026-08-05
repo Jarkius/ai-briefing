@@ -110,6 +110,26 @@ def list_tasks(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_task(conn: sqlite3.Connection, task_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM research_tasks WHERE id = ?", (task_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def search_tasks(conn: sqlite3.Connection, query: str) -> list[dict]:
+    """Newest-first, filtered to tasks whose input or findings text
+    contains `query` (case-insensitive substring — no FTS index for a
+    dataset this small; a full-text index would be premature complexity
+    for a personal research log)."""
+    like = f"%{query}%"
+    rows = conn.execute(
+        "SELECT * FROM research_tasks "
+        "WHERE input_text LIKE ? COLLATE NOCASE OR result_text LIKE ? COLLATE NOCASE "
+        "ORDER BY id DESC",
+        (like, like),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def mark_consumed(conn: sqlite3.Connection, task_ids: list[int], archive_file: str) -> None:
     """Records which archive a batch of ready tasks' findings landed in.
     Called only AFTER generate() has successfully produced that archive —

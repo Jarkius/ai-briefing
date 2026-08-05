@@ -296,3 +296,73 @@ def test_research_job_appends_findings_never_clobbers_paste(research_db):
     combined = "\n".join(t["result_text"] for t in ready)
     assert "my notes" in combined
     assert "from research" in combined
+
+
+# ---- search + detail view (mini research browser) ------------------------
+
+
+def test_research_search_filters_completed_list(research_db):
+    from briefing import research_store
+
+    conn = research_store.connect_at(research_db)
+    a = research_store.insert_queued(conn, "multi-agent orchestration")
+    research_store.mark_ready(conn, a, "findings about agents")
+    b = research_store.insert_queued(conn, "unrelated cooking topic")
+    research_store.mark_ready(conn, b, "findings about recipes")
+
+    with patch("panel.app.config.RESEARCH_REQUESTS_PATH", "/nonexistent"):
+        r = client.get("/research", params={"q": "agent"})
+    assert "multi-agent orchestration" in r.text
+    assert "unrelated cooking topic" not in r.text
+    assert 'value="agent"' in r.text  # search box retains the query
+
+
+def test_research_search_empty_query_shows_everything(research_db):
+    from briefing import research_store
+
+    conn = research_store.connect_at(research_db)
+    research_store.insert_queued(conn, "topic one")
+    research_store.insert_queued(conn, "topic two")
+
+    with patch("panel.app.config.RESEARCH_REQUESTS_PATH", "/nonexistent"):
+        r = client.get("/research")
+    assert "topic one" in r.text
+    assert "topic two" in r.text
+
+
+def test_research_detail_page_shows_full_findings(research_db):
+    from briefing import research_store
+
+    conn = research_store.connect_at(research_db)
+    task_id = research_store.insert_queued(conn, "peer-to-peer agent councils")
+    research_store.mark_ready(conn, task_id, "the full findings text, quite long")
+
+    r = client.get(f"/research/{task_id}")
+    assert r.status_code == 200
+    assert "peer-to-peer agent councils" in r.text
+    assert "the full findings text, quite long" in r.text
+    assert "not yet included" in r.text
+
+
+def test_research_detail_page_links_to_its_archive(tmp_path, research_db):
+    from briefing import research_store
+
+    arch = tmp_path / "archives"
+    arch.mkdir()
+    (arch / "briefing_2026-08-05_0900.md").write_text("# AI Briefing\n", encoding="utf-8")
+
+    conn = research_store.connect_at(research_db)
+    task_id = research_store.insert_queued(conn, "some topic")
+    research_store.mark_ready(conn, task_id, "findings")
+    research_store.mark_consumed(conn, [task_id], "briefing_2026-08-05_0900.md")
+
+    with patch("panel.app.config.ARCHIVE_DIR", str(arch)):
+        r = client.get(f"/research/{task_id}")
+    assert "/archive?view=briefing_2026-08-05_0900.md" in r.text
+    assert "✓ included" in r.text
+
+
+def test_research_detail_page_404s_for_unknown_id(research_db):
+    r = client.get("/research/999999")
+    assert r.status_code == 404
+    assert "No research task" in r.text

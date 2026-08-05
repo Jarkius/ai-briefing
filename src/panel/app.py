@@ -417,7 +417,7 @@ async def _research_job(phase) -> str:
 
 
 @app.get("/research", response_class=HTMLResponse)
-async def research(request: Request):
+async def research(request: Request, q: str = ""):
     # Still-unprocessed requests come from the checkbox file — a
     # research_store row only exists once research_one() has actually
     # returned a result (see _research_job's on_result).
@@ -435,9 +435,10 @@ async def research(request: Request):
     # didn't exist for /research/paste entries, which never wrote a
     # receipt at all — this is also where pasted material becomes visible
     # in this list for the first time.
+    q = q.strip()
     research_conn = research_store.connect()
     try:
-        tasks = research_store.list_tasks(research_conn)
+        tasks = research_store.search_tasks(research_conn, q) if q else research_store.list_tasks(research_conn)
     finally:
         research_conn.close()
     for t in tasks:
@@ -456,8 +457,31 @@ async def research(request: Request):
     )
     return templates.TemplateResponse(
         request, "research.html",
-        {"active": "research", "pending": pending, "tasks": tasks,
+        {"active": "research", "pending": pending, "tasks": tasks, "q": q,
          "live_fragment": _job_fragment(live) if live else None},
+    )
+
+
+@app.get("/research/{task_id}", response_class=HTMLResponse)
+async def research_detail(request: Request, task_id: int):
+    research_conn = research_store.connect()
+    try:
+        task = research_store.get_task(research_conn, task_id)
+    finally:
+        research_conn.close()
+    if task is None:
+        return HTMLResponse(
+            f'<div class="banner banner-warn">No research task #{task_id}.</div>',
+            status_code=404,
+        )
+    archive_entry = None
+    if task.get("archive_file"):
+        archive_entry = next(
+            (e for e in _list_archives() if e["file"] == task["archive_file"]), None
+        )
+    return templates.TemplateResponse(
+        request, "research_detail.html",
+        {"active": "research", "task": task, "archive_entry": archive_entry},
     )
 
 
