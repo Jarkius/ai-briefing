@@ -41,11 +41,18 @@
   {% endfor %}
 </ul>
 
-<h2 style="margin-top:2rem">Completed research (newest first)</h2>
+<div class="page-head" style="margin-top:2rem">
+  <h2 style="margin:0">Completed research (newest first)</h2>
+</div>
+<form method="get" action="/research" class="add-source" style="margin-bottom:1rem">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search past research by topic or findings text…">
+  <button type="submit">Search</button>
+  {% if q %}<a href="/research" class="chip">clear</a>{% endif %}
+</form>
 <ul class="requests">
   {% for t in tasks %}
   <li>
-    <span class="mono muted" title="research task #{{ t.id }}">#{{ t.id }}</span>
+    <a href="/research/{{ t.id }}" class="mono muted" title="open research task #{{ t.id }}">#{{ t.id }}</a>
     {% if t.state == 'ready' %}
       <span class="badge-flaky" title="findings exist but no edition has included them yet">⏳ ready — not yet included</span>
     {% elif t.state == 'consumed' %}
@@ -57,13 +64,13 @@
     {% elif t.state == 'failed' %}
       <span class="badge-senderr" title="{{ t.error_text }}">✗ failed</span>
     {% endif %}
-    — {{ t.input_text[:160] }}{{ '…' if t.input_text | length > 160 }}
+    — <a href="/research/{{ t.id }}">{{ t.input_text[:160] }}{{ '…' if t.input_text | length > 160 }}</a>
     {% if t.archive_entry %}
     <span class="in-archives">→ in <a href="/archive?view={{ t.archive_entry.file }}">{{ t.archive_entry.date }} {{ t.archive_entry.time }}</a></span>
     {% endif %}
   </li>
   {% else %}
-  <li class="empty-inline">No research completed yet.</li>
+  <li class="empty-inline">{{ "No research matches “%s”." % q if q else "No research completed yet." }}</li>
   {% endfor %}
 </ul>
 {% endblock %}

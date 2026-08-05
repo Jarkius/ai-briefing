@@ -104,3 +104,48 @@ def test_a_process_death_between_generate_and_consume_leaves_task_ready(tmp_path
     ready_after_crash = research_store.list_ready(conn)
     assert len(ready_after_crash) == 1
     assert ready_after_crash[0]["id"] == task_id
+
+
+def test_get_task_returns_none_for_unknown_id(tmp_path):
+    conn = _connect(tmp_path)
+    assert research_store.get_task(conn, 999) is None
+
+
+def test_get_task_returns_full_row(tmp_path):
+    conn = _connect(tmp_path)
+    task_id = research_store.insert_queued(conn, "some topic")
+    research_store.mark_ready(conn, task_id, "the findings")
+
+    task = research_store.get_task(conn, task_id)
+    assert task["input_text"] == "some topic"
+    assert task["result_text"] == "the findings"
+    assert task["state"] == "ready"
+
+
+def test_search_tasks_matches_input_text(tmp_path):
+    conn = _connect(tmp_path)
+    research_store.insert_queued(conn, "multi-agent orchestration")
+    research_store.insert_queued(conn, "unrelated topic")
+
+    results = research_store.search_tasks(conn, "agent")
+    assert len(results) == 1
+    assert results[0]["input_text"] == "multi-agent orchestration"
+
+
+def test_search_tasks_matches_result_text_too(tmp_path):
+    conn = _connect(tmp_path)
+    task_id = research_store.insert_queued(conn, "some topic")
+    research_store.mark_ready(conn, task_id, "the answer mentions AutoGen frameworks")
+
+    results = research_store.search_tasks(conn, "autogen")  # case-insensitive
+    assert len(results) == 1
+    assert results[0]["id"] == task_id
+
+
+def test_search_tasks_is_newest_first(tmp_path):
+    conn = _connect(tmp_path)
+    first = research_store.insert_queued(conn, "agent topic one")
+    second = research_store.insert_queued(conn, "agent topic two")
+
+    results = research_store.search_tasks(conn, "agent")
+    assert [t["id"] for t in results] == [second, first]
