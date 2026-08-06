@@ -129,7 +129,8 @@
     "source_type": "news",
     "identifier": "https://www.reddit.com/r/MachineLearning/hot.rss?limit=10",
     "name": "Reddit r/MachineLearning",
-    "consecutive_failures": 4
+    "consecutive_failures": 5,
+    "enabled": false
   },
   {
     "source_type": "arxiv",
