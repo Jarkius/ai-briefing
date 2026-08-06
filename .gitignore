@@ -44,6 +44,9 @@ archive/test-runs/
 # Claude Code local agent state
 .omc/
 
+# PMF index (disposable, rebuildable from ψ/memory/ via `pmf rebuild`)
+.pmf/
+
 # OS
 .DS_Store
 Thumbs.db
