@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_delete-now-dead-code-from-a-migration-immediately-update-dependent-tests-maintenance
 session_id: lesson_delete-now-dead-code-from-a-migration-immediately-update-dependent-tests-maintenance
-created_at: 2026-08-05T15:17:59.648Z
+created_at: 2026-08-06T15:25:35.425Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Delete now-dead code from a migration immediately, update dependent tests|maintenance"

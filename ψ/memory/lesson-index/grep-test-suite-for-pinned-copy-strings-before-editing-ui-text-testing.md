@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_grep-test-suite-for-pinned-copy-strings-before-editing-ui-text-testing
 session_id: lesson_grep-test-suite-for-pinned-copy-strings-before-editing-ui-text-testing
-created_at: 2026-08-05T15:17:59.648Z
+created_at: 2026-08-06T15:25:35.425Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Grep test suite for pinned copy strings before editing UI text|testing"
