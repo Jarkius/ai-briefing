@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_trace-a-bug-report-to-its-literal-root-cause-before-assuming-the-fix-is-what-the-report-s-phrasing-suggests-debugging
 session_id: lesson_trace-a-bug-report-to-its-literal-root-cause-before-assuming-the-fix-is-what-the-report-s-phrasing-suggests-debugging
-created_at: 2026-08-05T15:17:59.648Z
+created_at: 2026-08-06T15:25:35.425Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Trace a bug report to its literal root cause before assuming the fix is what the report's phrasing suggests|debugging"

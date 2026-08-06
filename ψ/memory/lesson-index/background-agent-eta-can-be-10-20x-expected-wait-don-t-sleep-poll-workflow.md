@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_background-agent-eta-can-be-10-20x-expected-wait-don-t-sleep-poll-workflow
 session_id: lesson_background-agent-eta-can-be-10-20x-expected-wait-don-t-sleep-poll-workflow
-created_at: 2026-08-05T15:17:59.648Z
+created_at: 2026-08-06T15:25:35.425Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Background agent ETA can be 10-20x expected; wait, don't sleep-poll|workflow"

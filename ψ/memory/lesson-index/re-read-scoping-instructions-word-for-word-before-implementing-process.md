@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_re-read-scoping-instructions-word-for-word-before-implementing-process
 session_id: lesson_re-read-scoping-instructions-word-for-word-before-implementing-process
-created_at: 2026-08-05T15:17:59.648Z
+created_at: 2026-08-06T15:25:35.425Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Re-read scoping instructions word-for-word before implementing|process"

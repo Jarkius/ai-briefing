@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_investigate-name-collision-overlaps-in-repo-plans-immediately-architecture
 session_id: lesson_investigate-name-collision-overlaps-in-repo-plans-immediately-architecture
-created_at: 2026-08-05T15:17:59.648Z
+created_at: 2026-08-06T15:25:35.425Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Investigate name-collision overlaps in repo plans immediately|architecture"
