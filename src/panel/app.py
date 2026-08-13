@@ -902,15 +902,27 @@ def _archive_date_str(date_part: str) -> str:
 
 
 def _render_archive(fname: str, date_part: str) -> dict:
-    """Re-render an archived markdown into the exact two-part HTML the
-    sender uses, with the ARCHIVE's own date."""
-    with open(os.path.join(config.ARCHIVE_DIR, fname), encoding="utf-8") as f:
+    """Re-render an archived edition with the archive's own date.
+
+    Part 1 and Part 2 are the exact two-part sender contract. A research
+    sibling is optional and display-only; old archives simply return None.
+    """
+    archive_path = os.path.join(config.ARCHIVE_DIR, fname)
+    with open(archive_path, encoding="utf-8") as f:
         markdown = f.read()
     date_str = _archive_date_str(date_part)
     p1_md, p2_md = sender.split_two_parts(markdown)
+    part3 = None
+    part3_path = os.path.join(config.ARCHIVE_DIR, fname[:-3] + "_part3_research.md")
+    if os.path.isfile(part3_path):
+        with open(part3_path, encoding="utf-8") as f:
+            part3 = sender.markdown_to_html(
+                f.read(), date_str, title="Daily AI Briefing — Part 3 · Requested Research"
+            )
     return {
         "part1": sender.markdown_to_html(p1_md, date_str, title="Daily AI Briefing — Part 1"),
         "part2": sender.markdown_to_html(p2_md, date_str, title="Daily AI Briefing — Part 2"),
+        "part3": part3,
         "date_str": date_str,
     }
 

@@ -682,9 +682,10 @@ def generate_social_post(source_material: str, date_str: str) -> str:
 
 def generate(conn, research_findings: str = "") -> dict:
     """Run the full generate step: fetch -> budget -> Gemini -> HTML.
-    Returns {'markdown': str, 'part1_html': str, 'part2_html': str,
-    'date_str': str, 'today': str}. Callers (CLI and dashboard) decide what
-    to do with the result (archive + send, or just render for preview)."""
+    Returns the two emailed parts plus nullable ``part3_md``/``part3_html``
+    for research-only preview/archive rendering. Part 3 is deliberately not
+    part of the sender contract; callers (CLI and dashboard) decide what to
+    do with the result (archive + send, or just render for preview)."""
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     # Built without %-d / %#d so it works on both Windows and Unix (%-d is a
@@ -720,6 +721,18 @@ def generate(conn, research_findings: str = "") -> dict:
     part1_md, part2_md = sender.split_two_parts(markdown)
     part1_html = sender.markdown_to_html(part1_md, date_str, title="Daily AI Briefing — Part 1")
     part2_html = sender.markdown_to_html(part2_md, date_str, title="Daily AI Briefing — Part 2")
+    part3_md = None
+    part3_html = None
+    if research_findings.strip():
+        # Researcher results use ``### label`` as a stable block marker.
+        # The newsletter renderer understands level-2 sections, so promote
+        # those markers for the standalone research view while preserving the
+        # findings text and the existing Part 2 receipt unchanged.
+        research_body = re.sub(r"^### ", "## ", research_findings.strip(), flags=re.MULTILINE)
+        part3_md = "# AI Briefing — Part 3\n\n## 🔍 Requested Research\n\n" + research_body + "\n"
+        part3_html = sender.markdown_to_html(
+            part3_md, date_str, title="Daily AI Briefing — Part 3 · Requested Research"
+        )
 
     os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
     # Seconds included: a cron generate and a dashboard regenerate landing in
@@ -734,12 +747,20 @@ def generate(conn, research_findings: str = "") -> dict:
     part2_archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}_part2_technical.md")
     with open(part2_archive_path, "w", encoding="utf-8") as f:
         f.write(part2_md)
-    log(f"Archived to {archive_path}, {part1_archive_path}, {part2_archive_path}")
+    archive_paths = [archive_path, part1_archive_path, part2_archive_path]
+    if part3_md is not None:
+        part3_archive_path = os.path.join(config.ARCHIVE_DIR, f"briefing_{today}_{hhmm}_part3_research.md")
+        with open(part3_archive_path, "w", encoding="utf-8") as f:
+            f.write(part3_md)
+        archive_paths.append(part3_archive_path)
+    log("Archived to " + ", ".join(archive_paths))
 
     return {
         "markdown": markdown,
         "part1_html": part1_html,
         "part2_html": part2_html,
+        "part3_md": part3_md,
+        "part3_html": part3_html,
         "date_str": date_str,
         "today": today,
         # Basename of the full-markdown archive this generation wrote —

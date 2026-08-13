@@ -151,6 +151,7 @@ def test_send_job_orchestrates_sender_and_records_status(tmp_path, monkeypatch):
 
     FAKE_GEN = {
         "part1_html": "<html>P1</html>", "part2_html": "<html>P2</html>",
+        "part3_html": "<html>P3 — preview only</html>",
         "date_str": "Saturday, July 25, 2026", "archive_file": "briefing_2026-07-25_0500.md",
     }
     state.set_generation(FAKE_GEN)

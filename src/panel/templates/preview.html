@@ -62,14 +62,36 @@
 
 {% if gen %}
 <p class="muted">Generated {{ gen.date_str }} — exactly what sender would email (same in-memory HTML).</p>
-<section class="letter">
-  <h2>Part 1 · News &amp; Learning</h2>
-  <iframe class="mail-frame" srcdoc="{{ gen.part1_html | e }}" sandbox=""></iframe>
-</section>
-<section class="letter">
-  <h2>Part 2 · Technical &amp; Community</h2>
-  <iframe class="mail-frame" srcdoc="{{ gen.part2_html | e }}" sandbox=""></iframe>
-</section>
+<div class="mail-tabs" data-tabset>
+  <div class="tab-list" role="tablist" aria-label="Generated briefing parts">
+    <button type="button" class="tab-button is-active" id="preview-tab-part1"
+            role="tab" aria-selected="true" aria-controls="preview-panel-part1"
+            data-tab-target="preview-panel-part1">Part 1 · News &amp; Learning</button>
+    <button type="button" class="tab-button" id="preview-tab-part2"
+            role="tab" aria-selected="false" aria-controls="preview-panel-part2"
+            data-tab-target="preview-panel-part2" tabindex="-1">Part 2 · Technical &amp; Community</button>
+    {% if gen.part3_html %}
+    <button type="button" class="tab-button" id="preview-tab-part3"
+            role="tab" aria-selected="false" aria-controls="preview-panel-part3"
+            data-tab-target="preview-panel-part3" tabindex="-1">Part 3 · Requested Research
+      <span class="tab-note">preview-only</span></button>
+    {% endif %}
+  </div>
+  <section class="tab-panel" id="preview-panel-part1" role="tabpanel" tabindex="0"
+           aria-labelledby="preview-tab-part1">
+    <iframe class="mail-frame" srcdoc="{{ gen.part1_html | e }}" sandbox=""></iframe>
+  </section>
+  <section class="tab-panel" id="preview-panel-part2" role="tabpanel" tabindex="0"
+           aria-labelledby="preview-tab-part2" hidden>
+    <iframe class="mail-frame" srcdoc="{{ gen.part2_html | e }}" sandbox=""></iframe>
+  </section>
+  {% if gen.part3_html %}
+  <section class="tab-panel" id="preview-panel-part3" role="tabpanel" tabindex="0"
+           aria-labelledby="preview-tab-part3" hidden>
+    <iframe class="mail-frame" srcdoc="{{ gen.part3_html | e }}" sandbox=""></iframe>
+  </section>
+  {% endif %}
+</div>
 {% else %}
 <div class="empty-state">
   <span class="empty-drop" aria-hidden="true">∅</span>
@@ -81,4 +103,33 @@
   </div>
 </div>
 {% endif %}
+<script>
+// Small, dependency-free tab controller. It is initialized on each page
+// render, including htmx's body refresh after Regenerate completes.
+document.querySelectorAll('[data-tabset]').forEach(set => {
+  const tabs = Array.from(set.querySelectorAll('[role="tab"]'));
+  const activate = (tab, moveFocus = false) => {
+    tabs.forEach(candidate => {
+      const active = candidate === tab;
+      candidate.setAttribute('aria-selected', active ? 'true' : 'false');
+      candidate.classList.toggle('is-active', active);
+      candidate.tabIndex = active ? 0 : -1;
+      const panel = set.querySelector('#' + candidate.getAttribute('data-tab-target'));
+      if (panel) panel.hidden = !active;
+    });
+    if (moveFocus) tab.focus();
+  };
+  tabs.forEach((tab, index) => tab.addEventListener('click', () => activate(tab)));
+  tabs.forEach((tab, index) => tab.addEventListener('keydown', event => {
+    const direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      activate(tabs[event.key === 'Home' ? 0 : tabs.length - 1], true);
+    } else if (direction) {
+      event.preventDefault();
+      activate(tabs[(index + direction + tabs.length) % tabs.length], true);
+    }
+  }));
+});
+</script>
 {% endblock %}

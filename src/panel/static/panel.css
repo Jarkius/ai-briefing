@@ -479,6 +479,28 @@ tr.just-updated { animation: row-flash 0.8s ease-out; }
 /* ---- mail preview: deliberately light card, contrasted against the dark shell ---- */
 .letter { margin: var(--sp-5) 0; }
 .letter h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.mail-tabs { margin: var(--sp-5) 0; }
+.tab-list {
+  display: flex; gap: var(--sp-2); flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); padding-bottom: var(--sp-2);
+}
+.tab-button {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-muted); background: transparent; border-color: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem; white-space: nowrap;
+}
+.tab-button:hover { color: var(--text); background: var(--surface-raised); border-color: var(--border); }
+.tab-button.is-active, .tab-button[aria-selected="true"] {
+  color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border);
+}
+.tab-note {
+  font-family: var(--mono); font-size: 0.62rem; margin-left: var(--sp-1);
+  color: var(--warn); border: 1px solid rgba(217, 164, 65, 0.4);
+  border-radius: var(--radius-sm); padding: 1px var(--sp-1);
+}
+.tab-panel { margin-top: var(--sp-4); }
+.tab-panel[hidden] { display: none; }
 .mail-frame {
   width: 100%;
   height: 640px;

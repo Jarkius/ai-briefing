@@ -21,6 +21,12 @@ FAKE_GEN = {
     "today": "2026-07-25",
 }
 
+FAKE_GEN_WITH_RESEARCH = {
+    **FAKE_GEN,
+    "part3_md": "# AI Briefing — Part 3\n\n## 🔍 Requested Research\n\n## Topic\nfindings",
+    "part3_html": "<html><body>PART3-RESEARCH-BYTES</body></html>",
+}
+
 
 def teardown_function():
     state.LAST_GENERATION = None
@@ -49,6 +55,28 @@ def test_preview_renders_both_parts_string_identical():
     assert html_lib.unescape(srcdocs[0]) == FAKE_GEN["part1_html"]
     assert html_lib.unescape(srcdocs[1]) == FAKE_GEN["part2_html"]
     assert FAKE_GEN["date_str"] in r.text
+
+
+def test_preview_shows_conditional_research_tab_and_exact_part3_html():
+    import html as html_lib
+    import re
+
+    state.set_generation(FAKE_GEN_WITH_RESEARCH)
+    r = client.get("/preview")
+    srcdocs = re.findall(r'srcdoc="([^"]*)"', r.text)
+
+    assert len(srcdocs) == 3
+    assert html_lib.unescape(srcdocs[2]) == FAKE_GEN_WITH_RESEARCH["part3_html"]
+    assert 'id="preview-tab-part3"' in r.text
+    assert "Part 3 · Requested Research" in r.text
+    assert "preview-only" in r.text
+
+
+def test_preview_omits_research_tab_without_part3_html():
+    state.set_generation(FAKE_GEN)
+    r = client.get("/preview")
+    assert "Part 3 · Requested Research" not in r.text
+    assert "preview-only" not in r.text
 
 
 def test_send_without_generation_returns_error_banner_no_job():
