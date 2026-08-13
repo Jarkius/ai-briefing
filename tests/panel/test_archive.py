@@ -42,6 +42,25 @@ def test_archive_page_renders_selected_with_archives_own_date(tmp_path):
     assert r.text.count("srcdoc") == 2
 
 
+def test_archive_page_renders_optional_research_part3(tmp_path):
+    full = tmp_path / "briefing_2026-07-24_0500.md"
+    full.write_text(FULL_MD)
+    (tmp_path / "briefing_2026-07-24_0500_part3_research.md").write_text(
+        "# AI Briefing — Part 3\n\n## 🔍 Requested Research\n\n## Topic\nfindings",
+        encoding="utf-8",
+    )
+
+    with patch("panel.app.config.ARCHIVE_DIR", str(tmp_path)):
+        r = client.get("/archive?view=briefing_2026-07-24_0500.md")
+
+    assert r.status_code == 200
+    assert r.text.count("srcdoc") == 3
+    assert 'id="archive-tab-part3"' in r.text
+    assert "Part 3 · Requested Research" in r.text
+    assert "findings" in r.text
+    assert "preview-only" in r.text
+
+
 def test_archive_page_defaults_to_newest(tmp_path):
     with _archive_dir(tmp_path):
         r = client.get("/archive")

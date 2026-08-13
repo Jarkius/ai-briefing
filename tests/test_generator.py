@@ -833,9 +833,12 @@ def test_generate_runs_full_pipeline_and_archives_files(tmp_path):
 
     assert cg.call_count == 1
     assert set(result.keys()) == {
-        "markdown", "part1_html", "part2_html", "date_str", "today", "archive_file",
+        "markdown", "part1_html", "part2_html", "part3_md", "part3_html",
+        "date_str", "today", "archive_file",
     }
     assert result["markdown"] == fake_markdown
+    assert result["part3_md"] is None
+    assert result["part3_html"] is None
     assert result["archive_file"].startswith("briefing_") and result["archive_file"].endswith(".md")
 
     archived = {p.name for p in archive_dir.iterdir()}
@@ -847,7 +850,7 @@ def test_generate_runs_full_pipeline_and_archives_files(tmp_path):
     assert full_archive_text == fake_markdown
 
 
-def test_generate_includes_research_receipt_in_part2_only(tmp_path):
+def test_generate_includes_research_receipt_and_dedicated_part3(tmp_path):
     conn = _connect_feeds_db(tmp_path)
     conn.commit()
 
@@ -867,6 +870,16 @@ def test_generate_includes_research_receipt_in_part2_only(tmp_path):
     assert "My Research Topic" not in result["part1_html"]
     assert "My Research Topic" in result["part2_html"]
     assert "Requested Research" in result["part2_html"]
+    assert result["part3_md"].startswith("# AI Briefing — Part 3")
+    assert "## My Research Topic" in result["part3_md"]
+    assert "Some findings text." in result["part3_md"]
+    assert "My Research Topic" in result["part3_html"]
+    assert "Some findings text." in result["part3_html"]
+
+    archived = {p.name for p in archive_dir.iterdir()}
+    assert any(n.endswith("_part3_research.md") for n in archived)
+    part3_archive = next(archive_dir.glob("*_part3_research.md"))
+    assert part3_archive.read_text(encoding="utf-8") == result["part3_md"]
 
 
 def test_generate_passes_budgeted_items_and_research_findings_to_call_gemini(tmp_path):
