@@ -6,12 +6,20 @@ the editable install of the `briefing` package — insert the repo root here
 (same pattern run.py itself uses for src/) rather than touching conftest.py.
 
 Every collaborator (collector, researcher, generator, sender, db) is
-monkeypatched — no real network, email, AI, or database calls.
+monkeypatched — no real network, email, AI, or database calls — EXCEPT in
+the "real generate()" section below, which deliberately leaves
+generator.generate() unstubbed (only its LLM call and archive dir are
+patched) to prove the Part 3 research-archive write introduced alongside
+the dashboard's research-preview tabs actually coexists with a real
+two-part send on the unattended cron path, not just in generator.py's own
+unit tests.
 """
 
+import functools
 import os
+import sqlite3
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,6 +28,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import run  # noqa: E402
+from briefing import config as briefing_config  # noqa: E402
 
 
 class _Recorder:
@@ -411,6 +420,90 @@ def test_main_logs_and_continues_when_network_check_fails(rec, monkeypatch, caps
     assert "no connectivity" in out
     # the pipeline still runs to completion despite the failed check
     assert rec.status_for("send_status") == "{'part1': 'sent', 'part2': 'sent'}"
+
+
+# ---- real generate(): Part 3 research archive on the actual cron path --------
+
+
+def test_main_real_generate_writes_part3_archive_and_sends_only_two_real_parts(tmp_path, monkeypatch):
+    """Unlike every other test in this file, generator.generate() itself is
+    NOT stubbed here — only its LLM call and archive dir are. This is the
+    one test that runs research_findings all the way through the real
+    generate() on run.main()'s actual cron path, proving: (1) the Part 3
+    research archive gets written to disk during a real run when research
+    is pending (not just in the dashboard), (2) sender.send_two_part_briefing
+    still receives exactly the two real parts with no Part 3 leakage, and
+    (3) the full/part1/part2/part3 archive files coexist with no path
+    collision."""
+    conn = sqlite3.connect(tmp_path / "feeds.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """CREATE TABLE feed_items (
+            title TEXT, content TEXT, url TEXT, source_type TEXT,
+            published_at TEXT, fetched_at TEXT
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO feed_items (title, content, url, source_type, published_at, fetched_at) "
+        "VALUES ('Item', 'c', 'http://a', 'news', '2026-07-30', datetime('now', '-1 hours'))"
+    )
+    conn.commit()
+
+    archive_dir = tmp_path / "archives"
+    fake_markdown = "# AI Briefing\n" + "\n\n---\n\n".join(
+        f"## Section {i}\ncontent for section {i}" for i in range(1, 7)
+    )
+
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    monkeypatch.setattr(run.config, "require_env", lambda: None)
+    monkeypatch.setattr(run.db, "connect", lambda: conn)
+    monkeypatch.setattr(run.db, "insert_run", lambda conn_arg, **kwargs: 1)
+    update_calls = []
+    monkeypatch.setattr(
+        run.db, "update_run", lambda conn_arg, run_id, **fields: update_calls.append(fields)
+    )
+    record_send_status_mock = MagicMock()
+    monkeypatch.setattr(run.db, "record_send_status", record_send_status_mock)
+    monkeypatch.setattr(run, "wait_for_network", lambda: True)
+    monkeypatch.setattr(run.collector, "run", lambda run_id, conn: "ok")
+    monkeypatch.setattr(
+        run.researcher, "run_pending", lambda: ("### My Topic\nSome findings text.\n", 1)
+    )
+    monkeypatch.setattr(run.generator, "social_post_candidate_items", lambda conn: [])
+    monkeypatch.setattr(run.researcher, "deep_fetch_items_sync", lambda items, max_items=None: [])
+
+    send_calls = []
+
+    def fake_send(part1_html, part2_html, date_str):
+        send_calls.append((part1_html, part2_html, date_str))
+        return {"part1": "sent", "part2": "sent"}
+
+    monkeypatch.setattr(run.sender, "send_two_part_briefing", fake_send)
+
+    with patch.object(briefing_config, "ARCHIVE_DIR", str(archive_dir)), \
+         patch.object(briefing_config, "STYLE_PATH", str(tmp_path / "no_such_style.md")), \
+         patch("briefing.generator.call_gemini", return_value=fake_markdown), \
+         patch("briefing.generator.open", functools.partial(open, encoding="utf-8")):
+        run.main()
+
+    # the real send path received exactly one call with exactly the two
+    # real HTML parts + date_str — no part3 argument leaked into it
+    assert len(send_calls) == 1
+    assert len(send_calls[0]) == 3
+
+    archived = {p.name for p in archive_dir.iterdir()}
+    assert any(n.endswith("_part3_research.md") for n in archived)
+    assert any(n.endswith("_part1_news.md") for n in archived)
+    assert any(n.endswith("_part2_technical.md") for n in archived)
+    full_archives = [
+        n for n in archived
+        if n.startswith("briefing_")
+        and n.endswith(".md")
+        and not n.endswith(("_part1_news.md", "_part2_technical.md", "_part3_research.md"))
+    ]
+    assert len(full_archives) == 1  # no collision between the full and Part 3 archive names
+
+    record_send_status_mock.assert_called_once()
 
 
 # ---- Phase 5: social post -----------------------------------------------------

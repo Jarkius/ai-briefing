@@ -59,6 +59,36 @@ def test_research_run_appends_pasted_lines_and_enqueues(tmp_path):
     assert "hx-get=\"/jobs/" in r.text
 
 
+def test_research_run_skips_line_duplicating_an_existing_unchecked_request(tmp_path):
+    """A double-submit (retry, double-click) of the same text must not queue
+    a second identical request — that gets independently researched again
+    (e.g. re-transcribing the same video) for no benefit."""
+    reqfile = tmp_path / "research_requests.md"
+    reqfile.write_text("- [ ] https://example.com/dupe\n")
+    with patch("panel.app.mcp_client.is_locked", return_value=False), \
+         patch("panel.app.config.RESEARCH_REQUESTS_PATH", str(reqfile)), \
+         patch("panel.app._research_job", new=AsyncMock(return_value="findings")):
+        client.post("/research/run", data={"text": "https://example.com/dupe\nnew topic"})
+    content = reqfile.read_text()
+    assert content.count("https://example.com/dupe") == 1
+    assert "- [ ] new topic" in content
+
+
+def test_research_run_skips_line_duplicating_an_already_checked_request(tmp_path):
+    """Same guard, but against a line already researched and checked off —
+    re-queuing a completed request is just as wasteful as re-queuing a
+    pending one."""
+    reqfile = tmp_path / "research_requests.md"
+    reqfile.write_text("- [x] https://example.com/done (researched 2026-08-06)\n")
+    with patch("panel.app.mcp_client.is_locked", return_value=False), \
+         patch("panel.app.config.RESEARCH_REQUESTS_PATH", str(reqfile)), \
+         patch("panel.app._research_job", new=AsyncMock(return_value="findings")):
+        client.post("/research/run", data={"text": "https://example.com/done"})
+    content = reqfile.read_text()
+    assert content.count("https://example.com/done") == 1
+    assert "- [ ] https://example.com/done" not in content
+
+
 def test_research_run_rejects_long_prose_pasted_as_one_line(tmp_path):
     """A wall of AI-brainstormed prose with no line breaks and no URL would
     otherwise become ONE '- [ ] <giant paragraph>' line, get treated as a
