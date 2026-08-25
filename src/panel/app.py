@@ -518,9 +518,28 @@ async def research_run(text: str = Form("")):
                 "use “Already have the material? Paste it directly” below instead. "
                 "Nothing was queued.",
             ))
+        # Skip lines identical to a request already on file (checked or
+        # unchecked) — without this, a double-submit (retry, double-click)
+        # queues the same URL/topic again and it gets independently
+        # researched a second time (e.g. re-transcribing the same video).
+        # Checked lines carry a trailing "(researched YYYY-MM-DD)" stamp
+        # (added by researcher.run_pending_async) that isn't part of the
+        # original request text, so it must be stripped before comparing.
+        import re as _dedup_re
+
+        existing_texts = set()
+        if os.path.exists(config.RESEARCH_REQUESTS_PATH):
+            with open(config.RESEARCH_REQUESTS_PATH, encoding="utf-8") as f:
+                for r in researcher.parse_requests(f.read()):
+                    t = r["text"]
+                    if r["checked"]:
+                        t = _dedup_re.sub(r"\s*\(researched \d{4}-\d{2}-\d{2}\)$", "", t)
+                    existing_texts.add(t)
+        new_lines = [ln for ln in lines if ln not in existing_texts]
         # Append pasted requests as unchecked lines; the job picks them up.
-        with open(config.RESEARCH_REQUESTS_PATH, "a", encoding="utf-8") as f:
-            f.write("\n" + "\n".join(f"- [ ] {ln}" for ln in lines) + "\n")
+        if new_lines:
+            with open(config.RESEARCH_REQUESTS_PATH, "a", encoding="utf-8") as f:
+                f.write("\n" + "\n".join(f"- [ ] {ln}" for ln in new_lines) + "\n")
     job_id = jobs.submit_async("research", _research_job)
     return HTMLResponse(_job_fragment(job_id))
 
