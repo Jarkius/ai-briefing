@@ -114,7 +114,10 @@ cp com.user.ai-briefing.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.user.ai-briefing.plist
 ```
 
-Runs daily at 06:00. Logs to `briefing.log` / `briefing_error.log`.
+Runs daily at 05:00. Logs to `briefing.log` / `briefing_error.log`. The
+plist calls `scripts/run_with_secrets.sh`, not `run.py` directly — see
+"Secrets Manager (Bitwarden, optional)" above; it works with plain `.env`
+too if Bitwarden isn't set up on that machine.
 
 ### Scheduled Run (Windows)
 
@@ -173,7 +176,55 @@ This repo is used from two Macs. Always work on a feature branch, never
 commit directly to `main`. `data/` (the local feeds DB) and `.venv/` are
 gitignored per-machine state — `subscriptions.json`, `newsletter_style.md`,
 and `research_requests.md` are the git-tracked files that sync your
-configuration and in-flight research between machines.
+configuration and in-flight research between machines. Secrets sync via
+Bitwarden Secrets Manager instead of manually copying `.env` — see below.
+
+## Secrets Manager (Bitwarden, optional)
+
+`.env` still works standalone (see Configuration above) — this is an
+additive layer for running the same secrets across multiple machines
+without ever copy-pasting `.env` between them again.
+
+**One-time setup (per Bitwarden organization, not per machine):**
+1. In a Bitwarden organization, create a Secrets Manager project (this repo
+   uses one named `ai-briefing`).
+2. Add each `.env` key you actually use as a secret in that project (skip
+   ones you don't use — e.g. no point syncing a disabled provider's key).
+
+**Per-machine setup:**
+1. Install the `bws` CLI — no Homebrew formula; download the release for
+   your platform from https://github.com/bitwarden/sdk-sm/releases (assets
+   tagged `bws-vX.Y.Z`) and put the binary on `PATH` (e.g. `~/.local/bin`).
+2. In the Bitwarden org → Secrets Manager → **Machine accounts**, create one
+   *per machine* (e.g. `ai-briefing-macbook`, `ai-briefing-desktop`) so each
+   machine's access can be revoked independently. Grant it "Can read" on the
+   `ai-briefing` project, then generate an access token on that machine
+   account (shown once).
+3. Save that token to `data/bws_access_token` on the machine (gitignored,
+   `chmod 600` — never commit it, never put it in `.env`). To get the token
+   onto the machine without retyping a long secret, store it as an item in
+   your regular Bitwarden password vault first (that one already syncs via
+   the app/browser extension) and paste it out from there once.
+4. Comment out the corresponding keys in that machine's local `.env` (see
+   the header comment `.env` grows once you do this) — otherwise
+   `config.py`'s `.env`-always-wins precedence silently shadows whatever
+   Bitwarden injects, and rotating a secret in Bitwarden would appear to do
+   nothing.
+
+**Running with Bitwarden secrets:**
+```bash
+scripts/run_with_secrets.sh              # instead of .venv/bin/python run.py
+scripts/run_with_secrets.sh --dry-run
+```
+It reads `data/bws_access_token`, then runs
+`bws run --project-id ... -- .venv/bin/python run.py`, which injects every
+secret in the project as an environment variable into that one process —
+`run.py` itself needs no changes. `com.user.ai-briefing.plist` already
+points launchd at this wrapper instead of calling `run.py` directly.
+
+To rotate a secret going forward: edit it in Bitwarden (web vault or
+`bws secret edit`), not in `.env` — the next scheduled run picks it up with
+no per-machine action needed.
 
 ## Legacy
 
@@ -189,10 +240,10 @@ SMTP/IMAP protocol ports (465/587/993) — confirmed on at least one office
 network this project runs on: TLS handshakes to `smtp.gmail.com` /
 `imap.gmail.com` reset consistently there, while HTTPS to Google works fine.
 
-`sender.py` tries SMTP first (no setup needed, works on most networks) and
-automatically falls back to the Gmail API over HTTPS if SMTP fails and the
-fallback is configured. Setup is one-time and needs a real browser login
-(this can't be scripted around — Google requires an explicit consent click):
+`sender.py` tries the Gmail API over HTTPS first once it's configured (see
+below), falling back to SMTP only if the API call fails or hasn't been set
+up yet. Setup is one-time and needs a real browser login (this can't be
+scripted around — Google requires an explicit consent click):
 
 ```bash
 .venv/bin/python scripts/setup_gmail_oauth.py
@@ -207,6 +258,25 @@ whenever SMTP fails; no `.env` changes needed.
 On Windows, the fallback chain is SMTP → Outlook COM automation instead
 (requires a local Outlook install) — the Gmail API fallback only applies on
 macOS/Linux where there's no Outlook to fall back to.
+
+**Publishing status matters.** While the Cloud Console OAuth consent screen
+sits in "Testing" (Console → APIs & Services → OAuth consent screen →
+Audience tab), Google kills the refresh token after 7 days regardless of
+use — silent, discovered only when the next send throws `invalid_grant`.
+Publishing the app ("Publish app" button on that same Audience tab, User
+type: External) removes that specific cap. There's no API/gcloud surface to
+check this status (only `iap oauth-brands`, which is unrelated and was
+deprecated/shut down in March 2026) — set `GMAIL_OAUTH_PUBLISHED=1` by hand
+once you've confirmed "In production" in Console, so the dashboard's
+`token_status()` indicator stops warning about a cap that no longer applies.
+
+Note publishing isn't a complete guarantee either — a token has been
+observed dying with `invalid_grant` well inside 7 days even while already
+published; the exact cause wasn't confirmed (candidates: the
+Testing→Production transition itself invalidating pre-existing grants, or
+an account-level security event). If it happens again, re-run
+`scripts/setup_gmail_oauth.py` and treat repeat fast deaths as a signal to
+check the Google Account's security activity log, not just re-mint blindly.
 
 ## Troubleshooting
 

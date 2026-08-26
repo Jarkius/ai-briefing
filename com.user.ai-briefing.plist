@@ -6,8 +6,9 @@
     <string>com.user.ai-briefing</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jarkius/workspace/dev/ai-briefing/.venv/bin/python</string>
-        <string>/Users/jarkius/workspace/dev/ai-briefing/run.py</string>
+        <string>/usr/bin/caffeinate</string>
+        <string>-i</string>
+        <string>/Users/jarkius/workspace/dev/ai-briefing/scripts/run_with_secrets.sh</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
