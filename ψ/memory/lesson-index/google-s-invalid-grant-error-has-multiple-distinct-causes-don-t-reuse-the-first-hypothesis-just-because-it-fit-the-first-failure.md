@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_google-s-invalid-grant-error-has-multiple-distinct-causes-don-t-reuse-the-first-hypothesis-just-because-it-fit-the-first-failure
 session_id: lesson_google-s-invalid-grant-error-has-multiple-distinct-causes-don-t-reuse-the-first-hypothesis-just-because-it-fit-the-first-failure
-created_at: 2026-08-26T16:10:50.807Z
+created_at: 2026-08-26T17:11:37.671Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Google's invalid_grant error has multiple distinct causes — don't reuse the first hypothesis just because it fit the first failure"

@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_console-only-oauth-state-with-no-api-surface-needs-a-human-set-config-flag-not-silent-code-assumptions
 session_id: lesson_console-only-oauth-state-with-no-api-surface-needs-a-human-set-config-flag-not-silent-code-assumptions
-created_at: 2026-08-26T16:10:50.807Z
+created_at: 2026-08-26T17:11:37.671Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Console-only OAuth state with no API surface needs a human-set config flag, not silent code assumptions"

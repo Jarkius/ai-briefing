@@ -2,7 +2,7 @@
 kind: lesson_index
 artifact_id: lesson_index_verify-auth-errors-with-a-direct-raw-client-call-not-just-the-pipeline-s-wrapped-error-text
 session_id: lesson_verify-auth-errors-with-a-direct-raw-client-call-not-just-the-pipeline-s-wrapped-error-text
-created_at: 2026-08-26T16:10:50.807Z
+created_at: 2026-08-26T17:11:37.671Z
 authority: index
 privacy: repo-safe
 summary: "pointer: Verify auth errors with a direct raw client call, not just the pipeline's wrapped error text"

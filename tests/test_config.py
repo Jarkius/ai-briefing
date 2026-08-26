@@ -124,6 +124,89 @@ def test_load_env_overrides_ambient_env_var(tmp_path, monkeypatch):
     assert os.environ["MY_TEST_KEY"] == "from_dotenv"
 
 
+# ---- _load_bitwarden ----------------------------------------------------
+
+
+def test_load_bitwarden_noop_when_token_file_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(tmp_path / "no_such_token"))
+    with patch("subprocess.run") as mock_run:
+        config._load_bitwarden()
+    mock_run.assert_not_called()
+
+
+def test_load_bitwarden_noop_when_bws_binary_missing(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    with patch("shutil.which", return_value=None), \
+         patch("os.path.exists", side_effect=lambda p: p == str(token_path)), \
+         patch("subprocess.run") as mock_run:
+        config._load_bitwarden()
+    mock_run.assert_not_called()
+
+
+def test_load_bitwarden_applies_env_output(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    monkeypatch.delenv("MY_TEST_KEY", raising=False)
+    fake_result = MagicMock(stdout='MY_TEST_KEY="from_bitwarden"\n')
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result) as mock_run:
+        config._load_bitwarden()
+    assert os.environ["MY_TEST_KEY"] == "from_bitwarden"
+    args, kwargs = mock_run.call_args
+    assert args[0] == ["/usr/local/bin/bws", "secret", "list", config.BWS_PROJECT_ID, "-o", "env"]
+    assert kwargs["env"]["BWS_ACCESS_TOKEN"] == "fake-token"
+
+
+def test_load_bitwarden_survives_subprocess_failure(tmp_path, monkeypatch):
+    import subprocess
+
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="bws", timeout=15)):
+        config._load_bitwarden()  # must not raise
+
+
+def test_load_env_lets_dotenv_override_bitwarden(tmp_path, monkeypatch):
+    """Precedence: Bitwarden fills os.environ first, then .env's existing
+    always-wins behavior applies on top — commenting a key out in .env
+    means "use Bitwarden's value", not "use nothing"."""
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    env_file = tmp_path / ".env"
+    env_file.write_text("MY_TEST_KEY=from_dotenv\n")
+    monkeypatch.setattr(config, "ENV_PATH", str(env_file))
+    fake_result = MagicMock(stdout='MY_TEST_KEY="from_bitwarden"\n')
+
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result):
+        config._load_env()
+
+    assert os.environ["MY_TEST_KEY"] == "from_dotenv"
+
+
+def test_load_env_uses_bitwarden_value_when_dotenv_key_absent(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    env_file = tmp_path / ".env"
+    env_file.write_text("# MY_TEST_KEY commented out, use Bitwarden instead\n")
+    monkeypatch.setattr(config, "ENV_PATH", str(env_file))
+    monkeypatch.delenv("MY_TEST_KEY", raising=False)
+    fake_result = MagicMock(stdout='MY_TEST_KEY="from_bitwarden"\n')
+
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result):
+        config._load_env()
+
+    assert os.environ["MY_TEST_KEY"] == "from_bitwarden"
+
+
 # ---- _bind --------------------------------------------------------------
 
 

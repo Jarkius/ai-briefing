@@ -88,6 +88,11 @@ for identifier formats per type.
 .venv/bin/python run.py --dry-run    # full run, prints instead of sending
 ```
 
+One entry point regardless of where secrets come from — `config.py` pulls
+from Bitwarden Secrets Manager internally if this machine has done that
+one-time setup (see "Secrets Manager" below), falling back to `.env`
+otherwise. Nothing else to remember or run differently.
+
 ### Pasting research requests
 
 Add a line to `research_requests.md`:
@@ -206,25 +211,24 @@ without ever copy-pasting `.env` between them again.
    your regular Bitwarden password vault first (that one already syncs via
    the app/browser extension) and paste it out from there once.
 4. Comment out the corresponding keys in that machine's local `.env` (see
-   the header comment `.env` grows once you do this) — otherwise
-   `config.py`'s `.env`-always-wins precedence silently shadows whatever
-   Bitwarden injects, and rotating a secret in Bitwarden would appear to do
-   nothing.
+   the header comment `.env` grows once you do this) so Bitwarden's value
+   actually takes effect — a key left active in `.env` still wins over
+   Bitwarden, same precedence rule as always.
 
-**Running with Bitwarden secrets:**
-```bash
-scripts/run_with_secrets.sh              # instead of .venv/bin/python run.py
-scripts/run_with_secrets.sh --dry-run
-```
-It reads `data/bws_access_token`, then runs
-`bws run --project-id ... -- .venv/bin/python run.py`, which injects every
-secret in the project as an environment variable into that one process —
-`run.py` itself needs no changes. `com.user.ai-briefing.plist` already
-points launchd at this wrapper instead of calling `run.py` directly.
+**Running with Bitwarden secrets:** nothing to run differently —
+`.venv/bin/python run.py` works as-is. `config.py`'s `_load_bitwarden()`
+checks for `data/bws_access_token`; if present, it runs
+`bws secret list --project-id ... -o env` and merges the result into
+`os.environ` before `.env` is read (so `.env`'s existing always-wins
+precedence is unchanged — commenting a key out there just means "use
+Bitwarden's value" now, instead of "use nothing"). If the token file is
+missing, or the `bws` CLI itself isn't installed, this step silently no-ops
+and `.env` behaves exactly as before — Bitwarden is additive, never a hard
+dependency, and there's exactly one entry point either way.
 
 To rotate a secret going forward: edit it in Bitwarden (web vault or
-`bws secret edit`), not in `.env` — the next scheduled run picks it up with
-no per-machine action needed.
+`bws secret edit`), not in `.env` — the next run picks it up with no
+per-machine action needed.
 
 ## Legacy
 
