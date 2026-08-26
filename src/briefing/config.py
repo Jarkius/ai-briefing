@@ -3,12 +3,19 @@
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ENV_PATH = os.path.join(REPO_ROOT, ".env")
 DATA_DIR = os.path.join(REPO_ROOT, "data")
+BWS_TOKEN_PATH = os.path.join(DATA_DIR, "bws_access_token")
+# Not a secret — a Secrets Manager project ID, already committed in
+# scripts/run_with_secrets.sh's history. One Bitwarden org per project is
+# assumed; a second project would need this to become configurable.
+BWS_PROJECT_ID = "06181b82-2489-4fdc-bd51-b4b20115e88a"
 FEEDS_DB_PATH = os.path.join(DATA_DIR, "feeds.db")
 MCP_LOCK_PATH = os.path.join(DATA_DIR, ".mcp.lock")
 # Separate from feeds.db (vendored-owned) and from the future workflow.db —
@@ -22,31 +29,70 @@ ARCHIVE_DIR = os.path.join(REPO_ROOT, "archives")
 LOG_PATH = os.path.join(REPO_ROOT, "briefing.log")
 
 
+def _apply_env_lines(text: str):
+    """Parse KEY=VALUE lines (dotenv-style) and set them in os.environ.
+    Shared by _load_env() (a real file) and _load_bitwarden() (bws's
+    stdout) — both need the same comment-stripping and quote-unwrapping."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            # Tolerate the two ways people actually write .env files:
+            # inline comments (VALUE   # note) and quoted values —
+            # both otherwise corrupt the value silently (e.g. a
+            # recipient address with a comment glued on).
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            os.environ[key.strip()] = value
+
+
+def _load_bitwarden():
+    """Populate os.environ from Bitwarden Secrets Manager, if this machine
+    has done the one-time setup (data/bws_access_token present) — see
+    "Secrets Manager (Bitwarden, optional)" in README.md. Applied before
+    _load_env() so .env's existing always-wins precedence is unchanged:
+    commenting a key out in .env still means "use Bitwarden's value",
+    exactly like it used to mean "use nothing"."""
+    if not os.path.exists(BWS_TOKEN_PATH):
+        return
+    bws_bin = shutil.which("bws")
+    if not bws_bin:
+        fallback = os.path.expanduser("~/.local/bin/bws")
+        if not os.path.exists(fallback):
+            print("Bitwarden token present but bws CLI not found — skipping", flush=True)
+            return
+        bws_bin = fallback
+    with open(BWS_TOKEN_PATH, encoding="utf-8") as f:
+        token = f.read().strip()
+    try:
+        result = subprocess.run(
+            [bws_bin, "secret", "list", BWS_PROJECT_ID, "-o", "env"],
+            env={**os.environ, "BWS_ACCESS_TOKEN": token},
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        print(f"Bitwarden secret fetch failed ({e}) — continuing without it", flush=True)
+        return
+    _apply_env_lines(result.stdout)
+
+
 def _load_env():
     """Load key=value pairs from .env next to the repo root (no external deps).
 
-    Overrides ambient shell exports for the specific keys this project
-    reads, rather than setdefault()'ing around them — several of these
-    names (MAXPLUS_API_KEY in particular) are also used by unrelated
-    tooling (e.g. Claude Code's own shell config) and can be exported
-    globally in an interactive terminal. Without this, commenting out a
-    key in .env to intentionally disable a provider silently does nothing
-    if a same-named var happens to be exported elsewhere — .env is the
-    explicit, per-project source of truth and must win."""
+    Overrides ambient shell exports (including whatever _load_bitwarden()
+    just set) for the specific keys this project reads, rather than
+    setdefault()'ing around them — several of these names (MAXPLUS_API_KEY
+    in particular) are also used by unrelated tooling (e.g. Claude Code's
+    own shell config) and can be exported globally in an interactive
+    terminal. Without this, commenting out a key in .env to intentionally
+    disable a provider silently does nothing if a same-named var happens to
+    be exported elsewhere — .env is the explicit, per-project source of
+    truth and must win."""
+    _load_bitwarden()
     if os.path.exists(ENV_PATH):
         with open(ENV_PATH, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, value = line.partition("=")
-                    # Tolerate the two ways people actually write .env files:
-                    # inline comments (VALUE   # note) and quoted values —
-                    # both otherwise corrupt the value silently (e.g. a
-                    # recipient address with a comment glued on).
-                    value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
-                    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                        value = value[1:-1]
-                    os.environ[key.strip()] = value
+            _apply_env_lines(f.read())
 
 
 def _bind():
@@ -58,7 +104,7 @@ def _bind():
     global CLAUDE_CLI_ENABLED, CLAUDE_CLI_MODEL
     global BEDROCK_ENABLED, BEDROCK_MODEL, BEDROCK_REGION, BEDROCK_PROFILE
     global PROVIDER_ORDER
-    global GMAIL_ADDRESS, GMAIL_APP_PASSWORD, RECIPIENT_EMAIL, RECIPIENT_EMAILS
+    global GMAIL_ADDRESS, GMAIL_APP_PASSWORD, GMAIL_OAUTH_PUBLISHED, RECIPIENT_EMAIL, RECIPIENT_EMAILS
     global REQUIRED_ENV
 
     MAXPLUS_API_KEY = os.environ.get("MAXPLUS_API_KEY", "")
@@ -101,6 +147,14 @@ def _bind():
     ]
     GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
     GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+    # Google's Cloud Console "Audience" tab has no API/gcloud surface (confirmed
+    # 2026-08-26 — gcloud's only OAuth-brand command, `iap oauth-brands`, is
+    # unrelated and deprecated) — this can't be auto-detected, so a human sets
+    # it once to match Console reality. False (Testing) is the safe default:
+    # it just means gmail_api.token_status() keeps warning before the real
+    # 7-day Testing-mode refresh-token death; True (published) drops that
+    # countdown since it no longer applies.
+    GMAIL_OAUTH_PUBLISHED = os.environ.get("GMAIL_OAUTH_PUBLISHED", "0").strip().lower() not in ("0", "false", "no")
     RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
     # Comma-separated in .env; every send path needs the parsed list (SMTP's
     # to_addrs and Outlook's To take all recipients, a bare comma string would

@@ -20,7 +20,8 @@ _BIND_ATTRS = [
     "CLAUDE_CLI_ENABLED", "CLAUDE_CLI_MODEL",
     "BEDROCK_ENABLED", "BEDROCK_MODEL", "BEDROCK_REGION",
     "PROVIDER_ORDER",
-    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "RECIPIENT_EMAIL", "RECIPIENT_EMAILS",
+    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "GMAIL_OAUTH_PUBLISHED",
+    "RECIPIENT_EMAIL", "RECIPIENT_EMAILS",
     "REQUIRED_ENV",
 ]
 
@@ -31,7 +32,7 @@ _ENV_KEYS = [
     "CLAUDE_CLI_ENABLED", "CLAUDE_CLI_MODEL",
     "BEDROCK_ENABLED", "BEDROCK_MODEL", "BEDROCK_REGION", "AWS_REGION",
     "PROVIDER_ORDER",
-    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "RECIPIENT_EMAIL",
+    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "GMAIL_OAUTH_PUBLISHED", "RECIPIENT_EMAIL",
 ]
 
 
@@ -124,6 +125,106 @@ def test_load_env_overrides_ambient_env_var(tmp_path, monkeypatch):
     assert os.environ["MY_TEST_KEY"] == "from_dotenv"
 
 
+# ---- _load_bitwarden ----------------------------------------------------
+
+
+def test_load_bitwarden_noop_when_token_file_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(tmp_path / "no_such_token"))
+    with patch("subprocess.run") as mock_run:
+        config._load_bitwarden()
+    mock_run.assert_not_called()
+
+
+def test_load_bitwarden_noop_when_bws_binary_missing(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    with patch("shutil.which", return_value=None), \
+         patch("os.path.exists", side_effect=lambda p: p == str(token_path)), \
+         patch("subprocess.run") as mock_run:
+        config._load_bitwarden()
+    mock_run.assert_not_called()
+
+
+def test_load_bitwarden_uses_local_bin_fallback_when_which_fails(tmp_path, monkeypatch):
+    """No Homebrew formula for bws exists (see README) — shutil.which()
+    misses it if the user only followed the documented ~/.local/bin
+    install path and that directory isn't on PATH for this process."""
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    fallback = os.path.expanduser("~/.local/bin/bws")
+    fake_result = MagicMock(stdout="")
+    with patch("shutil.which", return_value=None), \
+         patch("os.path.exists", side_effect=lambda p: p in (str(token_path), fallback)), \
+         patch("subprocess.run", return_value=fake_result) as mock_run:
+        config._load_bitwarden()
+    args, _ = mock_run.call_args
+    assert args[0][0] == fallback
+
+
+def test_load_bitwarden_applies_env_output(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    monkeypatch.delenv("MY_TEST_KEY", raising=False)
+    fake_result = MagicMock(stdout='MY_TEST_KEY="from_bitwarden"\n')
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result) as mock_run:
+        config._load_bitwarden()
+    assert os.environ["MY_TEST_KEY"] == "from_bitwarden"
+    args, kwargs = mock_run.call_args
+    assert args[0] == ["/usr/local/bin/bws", "secret", "list", config.BWS_PROJECT_ID, "-o", "env"]
+    assert kwargs["env"]["BWS_ACCESS_TOKEN"] == "fake-token"
+
+
+def test_load_bitwarden_survives_subprocess_failure(tmp_path, monkeypatch):
+    import subprocess
+
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="bws", timeout=15)):
+        config._load_bitwarden()  # must not raise
+
+
+def test_load_env_lets_dotenv_override_bitwarden(tmp_path, monkeypatch):
+    """Precedence: Bitwarden fills os.environ first, then .env's existing
+    always-wins behavior applies on top — commenting a key out in .env
+    means "use Bitwarden's value", not "use nothing"."""
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    env_file = tmp_path / ".env"
+    env_file.write_text("MY_TEST_KEY=from_dotenv\n")
+    monkeypatch.setattr(config, "ENV_PATH", str(env_file))
+    fake_result = MagicMock(stdout='MY_TEST_KEY="from_bitwarden"\n')
+
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result):
+        config._load_env()
+
+    assert os.environ["MY_TEST_KEY"] == "from_dotenv"
+
+
+def test_load_env_uses_bitwarden_value_when_dotenv_key_absent(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    env_file = tmp_path / ".env"
+    env_file.write_text("# MY_TEST_KEY commented out, use Bitwarden instead\n")
+    monkeypatch.setattr(config, "ENV_PATH", str(env_file))
+    monkeypatch.delenv("MY_TEST_KEY", raising=False)
+    fake_result = MagicMock(stdout='MY_TEST_KEY="from_bitwarden"\n')
+
+    with patch("shutil.which", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result):
+        config._load_env()
+
+    assert os.environ["MY_TEST_KEY"] == "from_bitwarden"
+
+
 # ---- _bind --------------------------------------------------------------
 
 
@@ -145,6 +246,7 @@ def test_bind_defaults_when_nothing_set(monkeypatch):
     assert config.GMAIL_APP_PASSWORD == ""
     assert config.RECIPIENT_EMAIL == ""
     assert config.RECIPIENT_EMAILS == []
+    assert config.GMAIL_OAUTH_PUBLISHED is False
     assert config.REQUIRED_ENV == {"GMAIL_ADDRESS": "", "GMAIL_APP_PASSWORD": ""}
 
 
@@ -156,6 +258,26 @@ def test_bind_claude_cli_enabled_false_for_falsy_values(monkeypatch, value):
     config._bind()
 
     assert config.CLAUDE_CLI_ENABLED is False
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "FALSE", "No"])
+def test_bind_gmail_oauth_published_false_for_falsy_values(monkeypatch, value):
+    _clear_bind_env(monkeypatch)
+    monkeypatch.setenv("GMAIL_OAUTH_PUBLISHED", value)
+
+    config._bind()
+
+    assert config.GMAIL_OAUTH_PUBLISHED is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "anything-else"])
+def test_bind_gmail_oauth_published_true_for_truthy_values(monkeypatch, value):
+    _clear_bind_env(monkeypatch)
+    monkeypatch.setenv("GMAIL_OAUTH_PUBLISHED", value)
+
+    config._bind()
+
+    assert config.GMAIL_OAUTH_PUBLISHED is True
 
 
 def test_bind_provider_order_trims_and_lowercases_custom_list(monkeypatch):
