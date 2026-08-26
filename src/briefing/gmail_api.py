@@ -54,11 +54,15 @@ def token_age_days() -> float | None:
 def token_status() -> dict:
     """Panel-facing summary: not_configured | ok | expiring_soon | expired.
     'expiring_soon'/'expired' assume Testing-mode's 7-day refresh-token
-    limit — harmless over-warning once the app is published, since a
-    published token has no such deadline and refreshes silently on use."""
+    limit, which no longer applies once config.GMAIL_OAUTH_PUBLISHED is set
+    (Console's Audience tab shows "In production") — there's no API to
+    check that status itself, so it's a one-time human-set flag rather than
+    an auto-detected one."""
     age = token_age_days()
     if age is None:
         return {"state": "not_configured", "age_days": None, "days_left": None}
+    if config.GMAIL_OAUTH_PUBLISHED:
+        return {"state": "ok", "age_days": round(age, 1), "days_left": None}
     days_left = TESTING_MODE_TOKEN_LIFETIME_DAYS - age
     if days_left <= 0:
         state = "expired"

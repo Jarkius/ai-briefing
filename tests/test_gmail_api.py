@@ -187,7 +187,8 @@ def test_token_status_not_configured(tmp_path):
 def test_token_status_ok_when_fresh(tmp_path):
     token_path = tmp_path / "token.json"
     token_path.write_text("{}")
-    with patch.object(gmail_api, "TOKEN_PATH", str(token_path)):
+    with patch.object(gmail_api, "TOKEN_PATH", str(token_path)), \
+         patch.object(gmail_api.config, "GMAIL_OAUTH_PUBLISHED", False):
         status = gmail_api.token_status()
     assert status["state"] == "ok"
     assert status["days_left"] > gmail_api.WARN_WITHIN_DAYS
@@ -200,6 +201,7 @@ def test_token_status_expiring_soon_near_deadline(tmp_path):
     token_path.write_text("{}")
     # 5.5 days old -> 1.5 days left, inside the 2-day warn window
     with patch.object(gmail_api, "TOKEN_PATH", str(token_path)), \
+         patch.object(gmail_api.config, "GMAIL_OAUTH_PUBLISHED", False), \
          patch("time.time", return_value=time.time() + 5.5 * 86400):
         status = gmail_api.token_status()
     assert status["state"] == "expiring_soon"
@@ -212,10 +214,26 @@ def test_token_status_expired_past_seven_days(tmp_path):
     token_path = tmp_path / "token.json"
     token_path.write_text("{}")
     with patch.object(gmail_api, "TOKEN_PATH", str(token_path)), \
+         patch.object(gmail_api.config, "GMAIL_OAUTH_PUBLISHED", False), \
          patch("time.time", return_value=time.time() + 9 * 86400):
         status = gmail_api.token_status()
     assert status["state"] == "expired"
     assert status["days_left"] < 0
+
+
+def test_token_status_ok_past_seven_days_when_published(tmp_path):
+    """Once Console's Audience tab shows "In production", the 7-day
+    Testing-mode countdown no longer applies — GMAIL_OAUTH_PUBLISHED=1
+    must suppress the false expired/expiring_soon warning."""
+    import time
+
+    token_path = tmp_path / "token.json"
+    token_path.write_text("{}")
+    with patch.object(gmail_api, "TOKEN_PATH", str(token_path)), \
+         patch.object(gmail_api.config, "GMAIL_OAUTH_PUBLISHED", True), \
+         patch("time.time", return_value=time.time() + 9 * 86400):
+        status = gmail_api.token_status()
+    assert status == {"state": "ok", "age_days": pytest.approx(9.0, abs=0.01), "days_left": None}
 
 
 # ---- run_oauth_consent -------------------------------------------------------

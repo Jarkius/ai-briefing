@@ -58,7 +58,7 @@ def _bind():
     global CLAUDE_CLI_ENABLED, CLAUDE_CLI_MODEL
     global BEDROCK_ENABLED, BEDROCK_MODEL, BEDROCK_REGION, BEDROCK_PROFILE
     global PROVIDER_ORDER
-    global GMAIL_ADDRESS, GMAIL_APP_PASSWORD, RECIPIENT_EMAIL, RECIPIENT_EMAILS
+    global GMAIL_ADDRESS, GMAIL_APP_PASSWORD, GMAIL_OAUTH_PUBLISHED, RECIPIENT_EMAIL, RECIPIENT_EMAILS
     global REQUIRED_ENV
 
     MAXPLUS_API_KEY = os.environ.get("MAXPLUS_API_KEY", "")
@@ -101,6 +101,14 @@ def _bind():
     ]
     GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
     GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+    # Google's Cloud Console "Audience" tab has no API/gcloud surface (confirmed
+    # 2026-08-26 — gcloud's only OAuth-brand command, `iap oauth-brands`, is
+    # unrelated and deprecated) — this can't be auto-detected, so a human sets
+    # it once to match Console reality. False (Testing) is the safe default:
+    # it just means gmail_api.token_status() keeps warning before the real
+    # 7-day Testing-mode refresh-token death; True (published) drops that
+    # countdown since it no longer applies.
+    GMAIL_OAUTH_PUBLISHED = os.environ.get("GMAIL_OAUTH_PUBLISHED", "0").strip().lower() not in ("0", "false", "no")
     RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_ADDRESS)
     # Comma-separated in .env; every send path needs the parsed list (SMTP's
     # to_addrs and Outlook's To take all recipients, a bare comma string would
