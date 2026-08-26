@@ -20,7 +20,8 @@ _BIND_ATTRS = [
     "CLAUDE_CLI_ENABLED", "CLAUDE_CLI_MODEL",
     "BEDROCK_ENABLED", "BEDROCK_MODEL", "BEDROCK_REGION",
     "PROVIDER_ORDER",
-    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "RECIPIENT_EMAIL", "RECIPIENT_EMAILS",
+    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "GMAIL_OAUTH_PUBLISHED",
+    "RECIPIENT_EMAIL", "RECIPIENT_EMAILS",
     "REQUIRED_ENV",
 ]
 
@@ -31,7 +32,7 @@ _ENV_KEYS = [
     "CLAUDE_CLI_ENABLED", "CLAUDE_CLI_MODEL",
     "BEDROCK_ENABLED", "BEDROCK_MODEL", "BEDROCK_REGION", "AWS_REGION",
     "PROVIDER_ORDER",
-    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "RECIPIENT_EMAIL",
+    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "GMAIL_OAUTH_PUBLISHED", "RECIPIENT_EMAIL",
 ]
 
 
@@ -145,6 +146,23 @@ def test_load_bitwarden_noop_when_bws_binary_missing(tmp_path, monkeypatch):
     mock_run.assert_not_called()
 
 
+def test_load_bitwarden_uses_local_bin_fallback_when_which_fails(tmp_path, monkeypatch):
+    """No Homebrew formula for bws exists (see README) — shutil.which()
+    misses it if the user only followed the documented ~/.local/bin
+    install path and that directory isn't on PATH for this process."""
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    fallback = os.path.expanduser("~/.local/bin/bws")
+    fake_result = MagicMock(stdout="")
+    with patch("shutil.which", return_value=None), \
+         patch("os.path.exists", side_effect=lambda p: p in (str(token_path), fallback)), \
+         patch("subprocess.run", return_value=fake_result) as mock_run:
+        config._load_bitwarden()
+    args, _ = mock_run.call_args
+    assert args[0][0] == fallback
+
+
 def test_load_bitwarden_applies_env_output(tmp_path, monkeypatch):
     token_path = tmp_path / "bws_access_token"
     token_path.write_text("fake-token\n")
@@ -228,6 +246,7 @@ def test_bind_defaults_when_nothing_set(monkeypatch):
     assert config.GMAIL_APP_PASSWORD == ""
     assert config.RECIPIENT_EMAIL == ""
     assert config.RECIPIENT_EMAILS == []
+    assert config.GMAIL_OAUTH_PUBLISHED is False
     assert config.REQUIRED_ENV == {"GMAIL_ADDRESS": "", "GMAIL_APP_PASSWORD": ""}
 
 
@@ -239,6 +258,26 @@ def test_bind_claude_cli_enabled_false_for_falsy_values(monkeypatch, value):
     config._bind()
 
     assert config.CLAUDE_CLI_ENABLED is False
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "FALSE", "No"])
+def test_bind_gmail_oauth_published_false_for_falsy_values(monkeypatch, value):
+    _clear_bind_env(monkeypatch)
+    monkeypatch.setenv("GMAIL_OAUTH_PUBLISHED", value)
+
+    config._bind()
+
+    assert config.GMAIL_OAUTH_PUBLISHED is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "anything-else"])
+def test_bind_gmail_oauth_published_true_for_truthy_values(monkeypatch, value):
+    _clear_bind_env(monkeypatch)
+    monkeypatch.setenv("GMAIL_OAUTH_PUBLISHED", value)
+
+    config._bind()
+
+    assert config.GMAIL_OAUTH_PUBLISHED is True
 
 
 def test_bind_provider_order_trims_and_lowercases_custom_list(monkeypatch):

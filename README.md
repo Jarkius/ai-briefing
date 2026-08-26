@@ -119,10 +119,7 @@ cp com.user.ai-briefing.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.user.ai-briefing.plist
 ```
 
-Runs daily at 05:00. Logs to `briefing.log` / `briefing_error.log`. The
-plist calls `scripts/run_with_secrets.sh`, not `run.py` directly — see
-"Secrets Manager (Bitwarden, optional)" above; it works with plain `.env`
-too if Bitwarden isn't set up on that machine.
+Runs daily at 05:00. Logs to `briefing.log` / `briefing_error.log`.
 
 ### Scheduled Run (Windows)
 
