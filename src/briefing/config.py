@@ -116,7 +116,7 @@ def bws_list_secrets():
         return None
 
 
-def bws_write_secret(key: str, value: str):
+def bws_write_secret(key: str, value: str, secrets=None):
     """Edit an existing Bitwarden secret by key name. Returns (True, None)
     on success, (False, error_message) otherwise — including "not found",
     since callers must not silently fall back to .env for a key meant to
@@ -124,8 +124,14 @@ def bws_write_secret(key: str, value: str):
     whole design exists to avoid). Never creates a new secret — panel
     /settings only calls this for keys bws_list_secrets() already showed
     as existing; a genuinely new key still goes to .env, same as before
-    Bitwarden existed."""
-    secrets = bws_list_secrets()
+    Bitwarden existed.
+
+    Pass an already-fetched secrets list (e.g. one settings_save() just
+    used to build its routing decision) to skip a second `bws secret list`
+    round-trip per key changed in the same save — each call is otherwise
+    a separate subprocess with its own 15s timeout budget."""
+    if secrets is None:
+        secrets = bws_list_secrets()
     if secrets is None:
         return False, "Bitwarden unavailable (token/CLI missing, or the list call failed)"
     match = next((s for s in secrets if s.get("key") == key), None)

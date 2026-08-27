@@ -244,6 +244,23 @@ def test_bws_write_secret_edits_matching_secret_by_id():
     assert kwargs["env"]["BWS_ACCESS_TOKEN"] == "fake-token"
 
 
+def test_bws_write_secret_skips_list_call_when_secrets_passed_in():
+    """A caller (settings_save, changing N keys in one save) that already
+    fetched the secrets list once must not trigger a second `bws secret
+    list` round-trip per key — each is a separate subprocess call with its
+    own 15s timeout budget."""
+    secrets = [{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old"}]
+    with patch.object(config, "bws_list_secrets") as list_mock, \
+         patch.object(config, "bws_binary", return_value="/usr/local/bin/bws"), \
+         patch.object(config, "_bws_token", return_value="fake-token"), \
+         patch("subprocess.run") as mock_run:
+        ok, err = config.bws_write_secret("GMAIL_ADDRESS", "new@x.com", secrets=secrets)
+    list_mock.assert_not_called()
+    assert ok is True
+    args, _ = mock_run.call_args
+    assert args[0] == ["/usr/local/bin/bws", "secret", "edit", "abc-123", "--value", "new@x.com"]
+
+
 def test_bws_write_secret_surfaces_stderr_on_failure():
     import subprocess as _subprocess
 

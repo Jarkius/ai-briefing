@@ -234,14 +234,15 @@ def test_settings_post_writes_to_bitwarden_when_key_has_no_active_env_line(tmp_p
     It should route to bws_write_secret() instead."""
     env = tmp_path / ".env"
     env.write_text("#GMAIL_ADDRESS=old-bitwarden-value\n")
+    secrets = [{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old-bitwarden-value"}]
     with patch("briefing.config.ENV_PATH", str(env)), \
          patch("panel.app.config.ENV_PATH", str(env)), \
          patch("panel.app.config.reload"), \
-         patch("panel.app.config.bws_list_secrets",
-               return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old-bitwarden-value"}]), \
+         patch("panel.app.config.bws_is_available", return_value=True), \
+         patch("panel.app.config.bws_list_secrets", return_value=secrets), \
          patch("panel.app.config.bws_write_secret", return_value=(True, None)) as write_mock:
         r = client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
-    write_mock.assert_called_once_with("GMAIL_ADDRESS", "new@x.com")
+    write_mock.assert_called_once_with("GMAIL_ADDRESS", "new@x.com", secrets=secrets)
     assert "GMAIL_ADDRESS=" not in env.read_text().replace("#GMAIL_ADDRESS=", "")
     assert "Bitwarden" in r.text
 
@@ -252,6 +253,7 @@ def test_settings_post_still_uses_env_for_key_not_in_bitwarden(tmp_path):
     with patch("briefing.config.ENV_PATH", str(env)), \
          patch("panel.app.config.ENV_PATH", str(env)), \
          patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_is_available", return_value=True), \
          patch("panel.app.config.bws_list_secrets", return_value=[]), \
          patch("panel.app.config.bws_write_secret") as write_mock:
         client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
@@ -268,6 +270,7 @@ def test_settings_post_active_env_line_wins_over_bitwarden(tmp_path):
     with patch("briefing.config.ENV_PATH", str(env)), \
          patch("panel.app.config.ENV_PATH", str(env)), \
          patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_is_available", return_value=True), \
          patch("panel.app.config.bws_list_secrets",
                return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "bitwarden-value"}]), \
          patch("panel.app.config.bws_write_secret") as write_mock:
@@ -282,6 +285,7 @@ def test_settings_post_surfaces_bitwarden_write_failure(tmp_path):
     with patch("briefing.config.ENV_PATH", str(env)), \
          patch("panel.app.config.ENV_PATH", str(env)), \
          patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_is_available", return_value=True), \
          patch("panel.app.config.bws_list_secrets",
                return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old"}]), \
          patch("panel.app.config.bws_write_secret",
@@ -289,6 +293,65 @@ def test_settings_post_surfaces_bitwarden_write_failure(tmp_path):
         r = client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
     assert "permission denied" in r.text
     assert "banner-err" in r.text
+
+
+def test_settings_post_never_writes_env_when_bitwarden_list_call_fails(tmp_path):
+    """CRITICAL regression guard: if bws_list_secrets() fails on a machine
+    that HAS done Bitwarden setup, a key with no active .env line must be
+    treated as unroutable, not silently written to .env — we can't tell
+    whether it's Bitwarden-sourced or genuinely new when the list call
+    itself failed, and guessing wrong recreates the shadowing bug."""
+    env = tmp_path / ".env"
+    env.write_text("#GMAIL_ADDRESS=old-bitwarden-value\n")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_is_available", return_value=True), \
+         patch("panel.app.config.bws_list_secrets", return_value=None), \
+         patch("panel.app.config.bws_write_secret") as write_mock:
+        r = client.post("/settings", data={"GMAIL_ADDRESS": "leaked-into-dotenv@x.com"})
+    write_mock.assert_not_called()
+    content = env.read_text()
+    assert "leaked-into-dotenv@x.com" not in content
+    assert "GMAIL_ADDRESS=leaked-into-dotenv@x.com" not in content
+    assert "banner-err" in r.text
+    assert "reached to verify" in r.text
+
+
+def test_settings_post_env_write_unaffected_when_bitwarden_never_configured(tmp_path):
+    """A machine with no Bitwarden setup at all must behave exactly as
+    before this feature existed — bws_is_available() False means the list
+    call is never even attempted, so a key with no active line is a
+    normal new .env write, not "unroutable"."""
+    env = tmp_path / ".env"
+    env.write_text("")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_is_available", return_value=False), \
+         patch("panel.app.config.bws_list_secrets") as list_mock:
+        r = client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
+    list_mock.assert_not_called()
+    assert "GMAIL_ADDRESS=new@x.com" in env.read_text()
+    assert "banner-err" not in r.text
+
+
+def test_settings_post_ignores_blank_value_for_bitwarden_sourced_key(tmp_path):
+    """A blank submission for a Bitwarden-sourced field must never wipe
+    the real secret — mirrors the .env path's own str(value).strip()
+    guard against writing empty values."""
+    env = tmp_path / ".env"
+    env.write_text("#GMAIL_ADDRESS=old-bitwarden-value\n")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_is_available", return_value=True), \
+         patch("panel.app.config.bws_list_secrets",
+               return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old-bitwarden-value"}]), \
+         patch("panel.app.config.bws_write_secret") as write_mock:
+        r = client.post("/settings", data={"GMAIL_ADDRESS": ""})
+    write_mock.assert_not_called()
+    assert "GMAIL_ADDRESS=" not in r.text  # not echoed as newly saved anywhere
 
 
 # ---- Gmail OAuth re-authorize (settings) -------------------------------------
