@@ -809,27 +809,64 @@ async def settings_save(request: Request):
     ]
     if order:
         form["PROVIDER_ORDER"] = ",".join(order)
+
+    # A key with no active .env line is either genuinely new (write it to
+    # .env, same as always) or currently sourced from Bitwarden — for that
+    # case, edit Bitwarden itself rather than silently creating a local
+    # .env override that would win over Bitwarden from then on (the exact
+    # precedence footgun the whole Bitwarden design exists to avoid).
+    lines = _read_env_lines()
+    active_keys = {
+        stripped.partition("=")[0].strip()
+        for line in lines
+        for stripped in [line.strip()]
+        if stripped and not stripped.startswith("#") and "=" in stripped
+    }
+    bitwarden_secrets = config.bws_list_secrets()
+    bitwarden_keys = {s["key"] for s in bitwarden_secrets} if bitwarden_secrets else set()
+
+    dotenv_form = {}
+    bitwarden_written = []
+    bitwarden_errors = []
+    for key, value in form.items():
+        if key not in SETTINGS_KEYS:
+            continue
+        if key not in active_keys and key in bitwarden_keys:
+            ok, err = config.bws_write_secret(key, value)
+            (bitwarden_written if ok else bitwarden_errors).append(key if ok else f"{key} ({err})")
+        else:
+            dotenv_form[key] = value
+
     # Rewrite only known keys in place, preserving unrelated lines/comments.
     # Values are NEVER logged (plan step 15).
-    lines = _read_env_lines()
     seen = set()
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.partition("=")[0].strip()
-            if key in SETTINGS_KEYS and key in form:
-                lines[i] = f"{key}={form[key]}"
+            if key in dotenv_form:
+                lines[i] = f"{key}={dotenv_form[key]}"
                 seen.add(key)
-    for key in SETTINGS_KEYS:
-        if key in form and key not in seen and str(form[key]).strip():
-            lines.append(f"{key}={form[key]}")
+    for key, value in dotenv_form.items():
+        if key not in seen and str(value).strip():
+            lines.append(f"{key}={value}")
     with open(config.ENV_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     config.restrict_to_owner_only(config.ENV_PATH)
     # Review M2: without this, the running server keeps stale constants and
     # the next regenerate/send silently uses the old values.
     config.reload()
-    return HTMLResponse(_banner("ok", "settings saved — applied to this server immediately (.env stays gitignored)"))
+
+    if bitwarden_errors:
+        return HTMLResponse(_banner(
+            "err", f"saved to .env, but Bitwarden write failed for: {', '.join(bitwarden_errors)}",
+        ))
+    parts = []
+    if dotenv_form:
+        parts.append(".env (this server only)")
+    if bitwarden_written:
+        parts.append(f"Bitwarden (all machines: {', '.join(bitwarden_written)})")
+    return HTMLResponse(_banner("ok", f"settings saved — {' + '.join(parts)}" if parts else "no changes"))
 
 
 # ---- archive -------------------------------------------------------------------

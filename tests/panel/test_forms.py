@@ -225,6 +225,72 @@ def test_settings_claude_cli_model_is_dropdown():
         assert f'value="{m}"' in r.text
 
 
+# ---- settings + Bitwarden routing --------------------------------------------
+
+
+def test_settings_post_writes_to_bitwarden_when_key_has_no_active_env_line(tmp_path):
+    """A key that's commented out in .env (Bitwarden-sourced) must not get
+    a new active line appended — that would silently override Bitwarden.
+    It should route to bws_write_secret() instead."""
+    env = tmp_path / ".env"
+    env.write_text("#GMAIL_ADDRESS=old-bitwarden-value\n")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_list_secrets",
+               return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old-bitwarden-value"}]), \
+         patch("panel.app.config.bws_write_secret", return_value=(True, None)) as write_mock:
+        r = client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
+    write_mock.assert_called_once_with("GMAIL_ADDRESS", "new@x.com")
+    assert "GMAIL_ADDRESS=" not in env.read_text().replace("#GMAIL_ADDRESS=", "")
+    assert "Bitwarden" in r.text
+
+
+def test_settings_post_still_uses_env_for_key_not_in_bitwarden(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_list_secrets", return_value=[]), \
+         patch("panel.app.config.bws_write_secret") as write_mock:
+        client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
+    write_mock.assert_not_called()
+    assert "GMAIL_ADDRESS=new@x.com" in env.read_text()
+
+
+def test_settings_post_active_env_line_wins_over_bitwarden(tmp_path):
+    """Precedence must match config.py: an already-active .env line keeps
+    being edited in .env, never redirected to Bitwarden, even if the same
+    key also exists there."""
+    env = tmp_path / ".env"
+    env.write_text("GMAIL_ADDRESS=active-local-override@x.com\n")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_list_secrets",
+               return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "bitwarden-value"}]), \
+         patch("panel.app.config.bws_write_secret") as write_mock:
+        client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
+    write_mock.assert_not_called()
+    assert "GMAIL_ADDRESS=new@x.com" in env.read_text()
+
+
+def test_settings_post_surfaces_bitwarden_write_failure(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("#GMAIL_ADDRESS=old\n")
+    with patch("briefing.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.ENV_PATH", str(env)), \
+         patch("panel.app.config.reload"), \
+         patch("panel.app.config.bws_list_secrets",
+               return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old"}]), \
+         patch("panel.app.config.bws_write_secret",
+               return_value=(False, "permission denied: token is read-only")):
+        r = client.post("/settings", data={"GMAIL_ADDRESS": "new@x.com"})
+    assert "permission denied" in r.text
+    assert "banner-err" in r.text
+
+
 # ---- Gmail OAuth re-authorize (settings) -------------------------------------
 
 

@@ -163,6 +163,101 @@ def test_load_bitwarden_uses_local_bin_fallback_when_which_fails(tmp_path, monke
     assert args[0][0] == fallback
 
 
+# ---- bws_is_available / bws_list_secrets / bws_write_secret -----------------
+
+
+def test_bws_is_available_false_when_token_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(tmp_path / "no_such_token"))
+    assert config.bws_is_available() is False
+
+
+def test_bws_is_available_false_when_binary_missing(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    with patch.object(config, "bws_binary", return_value=None):
+        assert config.bws_is_available() is False
+
+
+def test_bws_is_available_true_when_both_present(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    with patch.object(config, "bws_binary", return_value="/usr/local/bin/bws"):
+        assert config.bws_is_available() is True
+
+
+def test_bws_list_secrets_none_when_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(tmp_path / "no_such_token"))
+    with patch("subprocess.run") as mock_run:
+        assert config.bws_list_secrets() is None
+    mock_run.assert_not_called()
+
+
+def test_bws_list_secrets_parses_json(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    fake_result = MagicMock(stdout='[{"id": "abc", "key": "GMAIL_ADDRESS", "value": "x@y.com"}]')
+    with patch.object(config, "bws_binary", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result):
+        secrets = config.bws_list_secrets()
+    assert secrets == [{"id": "abc", "key": "GMAIL_ADDRESS", "value": "x@y.com"}]
+
+
+def test_bws_list_secrets_none_on_malformed_json(tmp_path, monkeypatch):
+    token_path = tmp_path / "bws_access_token"
+    token_path.write_text("fake-token\n")
+    monkeypatch.setattr(config, "BWS_TOKEN_PATH", str(token_path))
+    fake_result = MagicMock(stdout="not json")
+    with patch.object(config, "bws_binary", return_value="/usr/local/bin/bws"), \
+         patch("subprocess.run", return_value=fake_result):
+        assert config.bws_list_secrets() is None
+
+
+def test_bws_write_secret_fails_when_bitwarden_unavailable(monkeypatch):
+    with patch.object(config, "bws_list_secrets", return_value=None):
+        ok, err = config.bws_write_secret("GMAIL_ADDRESS", "new@x.com")
+    assert ok is False
+    assert "unavailable" in err.lower()
+
+
+def test_bws_write_secret_fails_when_key_not_found():
+    with patch.object(config, "bws_list_secrets",
+                       return_value=[{"id": "abc", "key": "OTHER_KEY", "value": "v"}]):
+        ok, err = config.bws_write_secret("GMAIL_ADDRESS", "new@x.com")
+    assert ok is False
+    assert "not found" in err.lower()
+
+
+def test_bws_write_secret_edits_matching_secret_by_id():
+    with patch.object(config, "bws_list_secrets",
+                       return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old"}]), \
+         patch.object(config, "bws_binary", return_value="/usr/local/bin/bws"), \
+         patch.object(config, "_bws_token", return_value="fake-token"), \
+         patch("subprocess.run") as mock_run:
+        ok, err = config.bws_write_secret("GMAIL_ADDRESS", "new@x.com")
+    assert ok is True
+    assert err is None
+    args, kwargs = mock_run.call_args
+    assert args[0] == ["/usr/local/bin/bws", "secret", "edit", "abc-123", "--value", "new@x.com"]
+    assert kwargs["env"]["BWS_ACCESS_TOKEN"] == "fake-token"
+
+
+def test_bws_write_secret_surfaces_stderr_on_failure():
+    import subprocess as _subprocess
+
+    err_obj = _subprocess.CalledProcessError(1, "bws", stderr="403: token is read-only")
+    with patch.object(config, "bws_list_secrets",
+                       return_value=[{"id": "abc-123", "key": "GMAIL_ADDRESS", "value": "old"}]), \
+         patch.object(config, "bws_binary", return_value="/usr/local/bin/bws"), \
+         patch.object(config, "_bws_token", return_value="fake-token"), \
+         patch("subprocess.run", side_effect=err_obj):
+        ok, err = config.bws_write_secret("GMAIL_ADDRESS", "new@x.com")
+    assert ok is False
+    assert "read-only" in err
+
+
 def test_load_bitwarden_applies_env_output(tmp_path, monkeypatch):
     token_path = tmp_path / "bws_access_token"
     token_path.write_text("fake-token\n")

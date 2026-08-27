@@ -47,6 +47,29 @@ def _apply_env_lines(text: str):
             os.environ[key.strip()] = value
 
 
+def bws_binary():
+    """Resolve the bws CLI path (no Homebrew formula — see README's Secrets
+    Manager setup steps for the manual ~/.local/bin install). None if it
+    isn't present anywhere, so callers can no-op instead of crashing."""
+    found = shutil.which("bws")
+    if found:
+        return found
+    fallback = os.path.expanduser("~/.local/bin/bws")
+    return fallback if os.path.exists(fallback) else None
+
+
+def bws_is_available():
+    """True once both halves of the one-time setup are done: a token file
+    and the CLI itself. Callers (panel /settings) use this to decide
+    whether a key with no active .env line should route to Bitwarden."""
+    return os.path.exists(BWS_TOKEN_PATH) and bws_binary() is not None
+
+
+def _bws_token():
+    with open(BWS_TOKEN_PATH, encoding="utf-8") as f:
+        return f.read().strip()
+
+
 def _load_bitwarden():
     """Populate os.environ from Bitwarden Secrets Manager, if this machine
     has done the one-time setup (data/bws_access_token present) — see
@@ -56,25 +79,72 @@ def _load_bitwarden():
     exactly like it used to mean "use nothing"."""
     if not os.path.exists(BWS_TOKEN_PATH):
         return
-    bws_bin = shutil.which("bws")
+    bws_bin = bws_binary()
     if not bws_bin:
-        fallback = os.path.expanduser("~/.local/bin/bws")
-        if not os.path.exists(fallback):
-            print("Bitwarden token present but bws CLI not found — skipping", flush=True)
-            return
-        bws_bin = fallback
-    with open(BWS_TOKEN_PATH, encoding="utf-8") as f:
-        token = f.read().strip()
+        print("Bitwarden token present but bws CLI not found — skipping", flush=True)
+        return
     try:
         result = subprocess.run(
             [bws_bin, "secret", "list", BWS_PROJECT_ID, "-o", "env"],
-            env={**os.environ, "BWS_ACCESS_TOKEN": token},
+            env={**os.environ, "BWS_ACCESS_TOKEN": _bws_token()},
             capture_output=True, text=True, timeout=15, check=True,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         print(f"Bitwarden secret fetch failed ({e}) — continuing without it", flush=True)
         return
     _apply_env_lines(result.stdout)
+
+
+def bws_list_secrets():
+    """Raw `bws secret list -o json` result as a list of dicts (id/key/value/
+    ...), or None if unavailable/failed. Panel-facing: used by /settings to
+    decide whether a key with no active .env line already exists in
+    Bitwarden (edit) or doesn't (fall through to the normal .env append)."""
+    if not bws_is_available():
+        return None
+    try:
+        result = subprocess.run(
+            [bws_binary(), "secret", "list", BWS_PROJECT_ID, "-o", "json"],
+            env={**os.environ, "BWS_ACCESS_TOKEN": _bws_token()},
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def bws_write_secret(key: str, value: str):
+    """Edit an existing Bitwarden secret by key name. Returns (True, None)
+    on success, (False, error_message) otherwise — including "not found",
+    since callers must not silently fall back to .env for a key meant to
+    live in Bitwarden (that would recreate the precedence footgun this
+    whole design exists to avoid). Never creates a new secret — panel
+    /settings only calls this for keys bws_list_secrets() already showed
+    as existing; a genuinely new key still goes to .env, same as before
+    Bitwarden existed."""
+    secrets = bws_list_secrets()
+    if secrets is None:
+        return False, "Bitwarden unavailable (token/CLI missing, or the list call failed)"
+    match = next((s for s in secrets if s.get("key") == key), None)
+    if match is None:
+        return False, f"{key} not found in Bitwarden project"
+    try:
+        subprocess.run(
+            [bws_binary(), "secret", "edit", match["id"], "--value", value],
+            env={**os.environ, "BWS_ACCESS_TOKEN": _bws_token()},
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        # stderr from bws itself never contains the secret value (edit's
+        # only argument that could is --value, which bws does not echo
+        # back on failure) — safe to surface directly in the panel banner.
+        return False, e.stderr.strip() or str(e)
+    except subprocess.TimeoutExpired:
+        return False, "Bitwarden write timed out"
+    return True, None
 
 
 def _load_env():
