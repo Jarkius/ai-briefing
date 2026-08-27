@@ -809,27 +809,97 @@ async def settings_save(request: Request):
     ]
     if order:
         form["PROVIDER_ORDER"] = ",".join(order)
+
+    # A key with no active .env line is either genuinely new (write it to
+    # .env, same as always) or currently sourced from Bitwarden — for that
+    # case, edit Bitwarden itself rather than silently creating a local
+    # .env override that would win over Bitwarden from then on (the exact
+    # precedence footgun the whole Bitwarden design exists to avoid).
+    #
+    # bws_list_secrets() returning None is ambiguous on a machine that HAS
+    # done Bitwarden setup: it could mean "this key genuinely isn't in
+    # Bitwarden" (fine, .env is correct) or "the list call itself failed"
+    # (NOT fine — we can't tell which no-active-line keys are Bitwarden-
+    # sourced, so silently writing any of them to .env would reintroduce
+    # the exact bug this feature fixes). Only trust "not in Bitwarden" when
+    # bws_is_available() is False — a machine that never set up Bitwarden
+    # at all — or when the list call actually succeeded.
+    lines = _read_env_lines()
+    active_keys = {
+        stripped.partition("=")[0].strip()
+        for line in lines
+        for stripped in [line.strip()]
+        if stripped and not stripped.startswith("#") and "=" in stripped
+    }
+    bitwarden_configured = config.bws_is_available()
+    bitwarden_secrets = config.bws_list_secrets() if bitwarden_configured else None
+    bitwarden_list_failed = bitwarden_configured and bitwarden_secrets is None
+    bitwarden_keys = {s["key"] for s in bitwarden_secrets} if bitwarden_secrets else set()
+
+    dotenv_form = {}
+    bitwarden_written = []
+    bitwarden_errors = []
+    unroutable = []
+    for key, value in form.items():
+        if key not in SETTINGS_KEYS:
+            continue
+        if key in active_keys:
+            dotenv_form[key] = value
+        elif key in bitwarden_keys:
+            if not str(value).strip():
+                # Mirrors the .env path's own guard below (skip blanks) —
+                # a Bitwarden-sourced field left blank must never wipe the
+                # real secret; there's no confirmation step here.
+                continue
+            ok, err = config.bws_write_secret(key, value, secrets=bitwarden_secrets)
+            (bitwarden_written if ok else bitwarden_errors).append(key if ok else f"{key} ({err})")
+        elif bitwarden_list_failed:
+            unroutable.append(key)
+        else:
+            dotenv_form[key] = value
+
     # Rewrite only known keys in place, preserving unrelated lines/comments.
     # Values are NEVER logged (plan step 15).
-    lines = _read_env_lines()
     seen = set()
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.partition("=")[0].strip()
-            if key in SETTINGS_KEYS and key in form:
-                lines[i] = f"{key}={form[key]}"
+            if key in dotenv_form:
+                lines[i] = f"{key}={dotenv_form[key]}"
                 seen.add(key)
-    for key in SETTINGS_KEYS:
-        if key in form and key not in seen and str(form[key]).strip():
-            lines.append(f"{key}={form[key]}")
+    for key, value in dotenv_form.items():
+        if key not in seen and str(value).strip():
+            lines.append(f"{key}={value}")
     with open(config.ENV_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     config.restrict_to_owner_only(config.ENV_PATH)
     # Review M2: without this, the running server keeps stale constants and
     # the next regenerate/send silently uses the old values.
     config.reload()
-    return HTMLResponse(_banner("ok", "settings saved — applied to this server immediately (.env stays gitignored)"))
+
+    if unroutable:
+        return HTMLResponse(_banner(
+            "err",
+            f"Bitwarden is configured but couldn't be reached to verify these keys — "
+            f"nothing was changed for: {', '.join(unroutable)}. Try again.",
+        ))
+    if bitwarden_errors:
+        ok_parts = []
+        if dotenv_form:
+            ok_parts.append(f".env: {', '.join(dotenv_form)}")
+        if bitwarden_written:
+            ok_parts.append(f"Bitwarden: {', '.join(bitwarden_written)}")
+        ok_summary = f" (succeeded — {'; '.join(ok_parts)})" if ok_parts else ""
+        return HTMLResponse(_banner(
+            "err", f"Bitwarden write failed for: {', '.join(bitwarden_errors)}{ok_summary}",
+        ))
+    parts = []
+    if dotenv_form:
+        parts.append(".env (this server only)")
+    if bitwarden_written:
+        parts.append(f"Bitwarden (all machines: {', '.join(bitwarden_written)})")
+    return HTMLResponse(_banner("ok", f"settings saved — {' + '.join(parts)}" if parts else "no changes"))
 
 
 # ---- archive -------------------------------------------------------------------
